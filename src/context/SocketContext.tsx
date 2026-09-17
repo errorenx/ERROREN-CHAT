@@ -54,12 +54,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
   const [typingUsers, setTypingUsers] = useState<{ [chatId: string]: string | null }>({});
 
-  // Ensure current user is always included in online users when online
+  // Ensure current user and AI assistant are always included in online users when online
   const effectiveOnlineUserIds = useMemo(() => {
     const set = new Set(onlineUserIds);
     const isNetOnline = typeof navigator !== 'undefined' ? navigator.onLine : isConnected;
     if (currentUser?.id && isNetOnline) {
       set.add(currentUser.id);
+    }
+    if (isNetOnline) {
+      set.add('user_ai_assistant');
     }
     return set;
   }, [onlineUserIds, currentUser?.id, isConnected]);

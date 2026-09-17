@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Logo } from '../common/Logo';
-import { GoogleAccountSelectorModal, GoogleGIcon } from './GoogleAccountSelectorModal';
 import { 
   ArrowLeft, 
   AlertCircle, 
@@ -27,9 +26,7 @@ export const GoogleLoginScreen: React.FC = () => {
   } = useAuth();
   const { isDark } = useTheme();
 
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
-
-  // Mode: Only 'register' | 'login'
+  // Mode: Only 'register' (Create Account) | 'login' (Sign In)
   const [authMode, setAuthMode] = useState<'register' | 'login'>(
     initialAuthMode === 'login' ? 'login' : 'register'
   );
@@ -177,30 +174,8 @@ export const GoogleLoginScreen: React.FC = () => {
           </p>
         </div>
 
-        {/* Continue with Google Action */}
-        <div className="mt-5 w-full">
-          <button
-            type="button"
-            onClick={() => setShowGoogleModal(true)}
-            className={`w-full flex items-center justify-center gap-3 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm transition shadow-md border active:scale-95 ${
-              isDark 
-                ? 'bg-white hover:bg-slate-100 text-slate-900 border-white/20' 
-                : 'bg-white hover:bg-slate-50 text-slate-900 border-slate-300 shadow-sm'
-            }`}
-          >
-            <GoogleGIcon className="w-5 h-5 shrink-0" />
-            <span>Continue with Google</span>
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3 w-full my-4">
-          <div className={`flex-1 h-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
-          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">or email / username</span>
-          <div className={`flex-1 h-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
-        </div>
-
-        {/* Auth Mode Toggle Tabs (Register vs Login only) */}
-        <div className={`p-1 rounded-2xl border flex items-center gap-1 ${
+        {/* Auth Mode Toggle Tabs (Only 1 Create Account & 2 Sign In) */}
+        <div className={`mt-6 p-1 rounded-2xl border flex items-center gap-1 ${
           isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-100 border-slate-200'
         }`}>
           <button
@@ -209,14 +184,14 @@ export const GoogleLoginScreen: React.FC = () => {
               setAuthMode('register');
               setLocalError(null);
             }}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
               authMode === 'register'
                 ? 'bg-emerald-500 text-slate-950 shadow-md'
                 : isDark ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span>Register</span>
+            <UserPlus className="w-4 h-4" />
+            <span>Create Account</span>
           </button>
           <button
             type="button"
@@ -224,14 +199,14 @@ export const GoogleLoginScreen: React.FC = () => {
               setAuthMode('login');
               setLocalError(null);
             }}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
               authMode === 'login'
                 ? 'bg-emerald-500 text-slate-950 shadow-md'
                 : isDark ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <LogIn className="w-3.5 h-3.5" />
-            <span>Login</span>
+            <LogIn className="w-4 h-4" />
+            <span>Sign In</span>
           </button>
         </div>
 
@@ -486,12 +461,6 @@ export const GoogleLoginScreen: React.FC = () => {
           </form>
         )}
       </div>
-
-      {/* Google Account Selector Modal */}
-      <GoogleAccountSelectorModal
-        isOpen={showGoogleModal}
-        onClose={() => setShowGoogleModal(false)}
-      />
     </div>
   );
 };

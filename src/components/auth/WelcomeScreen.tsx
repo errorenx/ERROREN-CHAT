@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Logo } from '../common/Logo';
-import { GoogleAccountSelectorModal, GoogleGIcon } from './GoogleAccountSelectorModal';
 import { 
   Zap, 
   Video, 
@@ -17,7 +16,6 @@ import {
 
 export const WelcomeScreen: React.FC = () => {
   const { setAuthStep, setInitialAuthMode } = useAuth();
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
 
   const features = [
     {
@@ -108,46 +106,29 @@ export const WelcomeScreen: React.FC = () => {
           Experience ultra-responsive real-time messaging, crystal-clear voice and video calling, 24-hour status stories, and your dedicated ERROREN AI assistant.
         </p>
 
-        {/* Primary Action Buttons: Continue with Google & Manual Sign In/Register */}
-        <div className="mt-8 flex flex-col items-center gap-3 w-full max-w-sm justify-center">
-          {/* Continue with Google */}
+        {/* Primary Action Buttons: Only 1 Create Account & 2 Sign In */}
+        <div className="mt-8 flex flex-col sm:flex-row items-center gap-3 w-full max-w-md justify-center">
           <button
-            onClick={() => setShowGoogleModal(true)}
-            className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-100 text-slate-900 font-bold px-6 py-3.5 rounded-2xl shadow-xl shadow-white/10 transition-all hover:scale-[1.02] active:scale-[0.98] text-sm border border-slate-200"
+            onClick={() => {
+              setInitialAuthMode('register');
+              setAuthStep('google_login');
+            }}
+            className="w-full sm:flex-1 flex items-center justify-center gap-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-6 py-3.5 rounded-2xl shadow-xl shadow-emerald-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] text-sm"
           >
-            <GoogleGIcon className="w-5 h-5 shrink-0" />
-            <span>Continue with Google</span>
+            <UserPlus className="w-4 h-4" />
+            <span>Create Account</span>
           </button>
 
-          <div className="flex items-center gap-3 w-full my-1">
-            <div className="flex-1 h-px bg-slate-800" />
-            <span className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">or email & phone</span>
-            <div className="flex-1 h-px bg-slate-800" />
-          </div>
-
-          <div className="flex items-center gap-2.5 w-full">
-            <button
-              onClick={() => {
-                setInitialAuthMode('register');
-                setAuthStep('google_login');
-              }}
-              className="flex-1 flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-4 py-3 rounded-2xl shadow-lg shadow-emerald-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] text-xs sm:text-sm"
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>Create Account</span>
-            </button>
-
-            <button
-              onClick={() => {
-                setInitialAuthMode('login');
-                setAuthStep('google_login');
-              }}
-              className="flex-1 flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white font-bold px-4 py-3 rounded-2xl border border-slate-700/80 transition-all hover:scale-[1.02] active:scale-[0.98] text-xs sm:text-sm"
-            >
-              <LogIn className="w-4 h-4" />
-              <span>Sign In</span>
-            </button>
-          </div>
+          <button
+            onClick={() => {
+              setInitialAuthMode('login');
+              setAuthStep('google_login');
+            }}
+            className="w-full sm:flex-1 flex items-center justify-center gap-2.5 bg-slate-900 hover:bg-slate-800 text-slate-100 hover:text-white font-bold px-6 py-3.5 rounded-2xl border border-slate-700/90 shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98] text-sm"
+          >
+            <LogIn className="w-4 h-4" />
+            <span>Sign In</span>
+          </button>
         </div>
 
         {/* Feature Grid */}
@@ -176,15 +157,9 @@ export const WelcomeScreen: React.FC = () => {
         {/* Security Banner */}
         <div className="mt-10 flex items-center justify-center gap-2 text-xs text-slate-500">
           <Lock className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Real-time WebSocket connection • Secure Google Authentication</span>
+          <span>Real-time WebSocket connection • End-to-End Encrypted Messaging</span>
         </div>
       </main>
-
-      {/* Google Account Selector Modal */}
-      <GoogleAccountSelectorModal
-        isOpen={showGoogleModal}
-        onClose={() => setShowGoogleModal(false)}
-      />
     </div>
   );
 };

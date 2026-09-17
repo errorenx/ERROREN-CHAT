@@ -57,12 +57,6 @@ const MainAppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<MainTab>('chats');
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (activeTab === ('ai' as MainTab)) {
-      setActiveTab('chats');
-    }
-  }, [activeTab]);
-
   // Application Data States
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatMessages, setChatMessages] = useState<{ [chatId: string]: Message[] }>({});
@@ -77,22 +71,59 @@ const MainAppContent: React.FC = () => {
   const [activeViewingStory, setActiveViewingStory] = useState<StatusStory | null>(null);
   const [showGroupInfoDrawer, setShowGroupInfoDrawer] = useState(false);
 
-  // Helper to filter test chats and ensure only the user's username chat exists by default
+  // Helper to filter test chats and ensure user self chat & ERROREN AI chat exist by default
   const sanitizeChatsList = (rawChats: Chat[], user: User): Chat[] => {
     const selfChatId = `chat_self_${user.id}`;
+    const aiChatId = 'chat_erroren_ai';
     const userHandle = user.username ? `@${user.username}` : (user.displayName || 'user');
 
-    // Remove any test chats or mock artifacts or AI assistants
+    // Remove any test chats or mock artifacts
     const filtered = (rawChats || []).filter((c) => {
       const name = (c.name || c.title || '').toLowerCase();
       if (name.includes('test') || name === 'janu' || name === 'mani') return false;
-      if (name.includes('erroren ai') || name.includes('ready to assist')) return false;
-      if (c.id.includes('chat_ai') || c.id.includes('erroren_ai')) return false;
       if (c.id === 'chat_1789026111971_emok' || c.id === 'chat_1789546741695_qsg9') return false;
       return true;
     });
 
-    // Check if user's own username chat exists
+    // 1. Ensure ERROREN AI official chat is present and pinned
+    const hasAiChat = filtered.some((c) => c.id === aiChatId);
+    if (!hasAiChat) {
+      const aiChat: Chat = {
+        id: aiChatId,
+        name: 'ERROREN AI',
+        title: 'ERROREN AI',
+        avatarUrl: 'https://api.dicebear.com/7.x/bottts/svg?seed=erroren_ai_chat',
+        memberIds: [user.id, 'user_ai_assistant'],
+        participantIds: [user.id, 'user_ai_assistant'],
+        isGroup: false,
+        isPinned: true,
+        unreadCount: 0,
+        createdAt: 1700000000000,
+        updatedAt: Date.now(),
+        lastMessage: {
+          id: 'msg_ai_welcome_initial',
+          chatId: aiChatId,
+          senderId: 'user_ai_assistant',
+          senderName: 'ERROREN AI',
+          content: 'Assalam-o-Alaikum! How can I help you today? Ask me anything in any language.',
+          type: 'text',
+          timestamp: Date.now(),
+          status: 'read',
+        },
+      };
+      filtered.unshift(aiChat);
+    } else {
+      filtered.forEach((c) => {
+        if (c.id === aiChatId) {
+          c.name = 'ERROREN AI';
+          c.title = 'ERROREN AI';
+          c.isPinned = true;
+          c.avatarUrl = 'https://api.dicebear.com/7.x/bottts/svg?seed=erroren_ai_chat';
+        }
+      });
+    }
+
+    // 2. Check if user's own username chat exists
     const hasSelfChat = filtered.some((c) => c.id === selfChatId || (!c.isGroup && c.memberIds?.length === 1 && c.memberIds[0] === user.id));
     if (!hasSelfChat) {
       const selfChat: Chat = {
@@ -799,9 +830,11 @@ const MainAppContent: React.FC = () => {
                 />
               </div>
 
-              {/* Right Column: Active Conversation */}
+              {/* Right Column: Active Conversation or ERROREN AI */}
               <div className={`flex-1 flex ${!selectedChatId ? 'hidden md:flex' : 'flex'}`}>
-                {activeChat ? (
+                {selectedChatId === 'chat_erroren_ai' ? (
+                  <ErrorenAiView currentUser={currentUser} onBack={() => setSelectedChatId(null)} />
+                ) : activeChat ? (
                   <ChatConversation
                     chat={activeChat}
                     messages={activeMessages}
@@ -869,6 +902,11 @@ const MainAppContent: React.FC = () => {
               onOpenCreateStatus={() => setShowCreateStatusModal(true)}
               onViewStatus={(story) => setActiveViewingStory(story)}
             />
+          )}
+
+          {/* Tab: ERROREN AI Assistant */}
+          {activeTab === 'ai' && (
+            <ErrorenAiView currentUser={currentUser} onBack={() => setActiveTab('chats')} />
           )}
 
           {/* Tab: Communities */}

@@ -21,7 +21,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script>
-      // 1. Dynamic Base & Trailing Slash resolution for GitHub Pages
+      // 1. Trailing slash resolution for GitHub Pages project repositories
       (function() {
         var l = window.location;
         var p = l.pathname;
@@ -33,14 +33,6 @@
           // If in project repository subfolder and missing trailing slash, enforce trailing slash
           if (segments.length >= 1 && !p.endsWith('/') && !segments[segments.length - 1].includes('.')) {
             l.replace(l.protocol + '//' + l.host + p + '/' + (l.search || '') + (l.hash || ''));
-            return;
-          }
-
-          // Insert dynamic base tag if repo subpath exists to prevent asset resolution 404s
-          if (segments.length >= 1 && segments[0] !== hostname.split('.')[0]) {
-            var base = document.createElement('base');
-            base.href = '/' + segments[0] + '/';
-            document.head.appendChild(base);
           }
         }
       })();

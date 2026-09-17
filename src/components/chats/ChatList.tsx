@@ -78,6 +78,24 @@ export const ChatList: React.FC<ChatListProps> = ({
 
   const getPartnerStatus = (chat: Chat) => {
     if (chat.isGroup) return false;
+
+    // 1. ERROREN AI assistant chat: always online with bright green dot when user is online
+    const isAiChat = chat.id === 'chat_erroren_ai' || chat.id.includes('erroren_ai') || (chat.name || chat.title || '').toLowerCase().includes('erroren ai');
+    if (isAiChat) {
+      const isNetOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      return isNetOnline;
+    }
+
+    // 2. Personal Self Chat ("YOU" / Note to Self): show online when user is online
+    const isSelfChat = chat.id.startsWith('chat_self_') || 
+      (chat.name || chat.title || '').toLowerCase().includes('(you)') || 
+      ((chat.memberIds?.length === 1 || chat.participantIds?.length === 1) && (chat.memberIds?.[0] === currentUserId || chat.participantIds?.[0] === currentUserId));
+    if (isSelfChat) {
+      const isNetOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      const userOnline = currentUserId ? onlineUserIds.has(currentUserId) : isNetOnline;
+      return userOnline || isNetOnline;
+    }
+
     const partnerId = (chat.participantIds || chat.memberIds || []).find(id => id !== currentUserId);
     return partnerId ? onlineUserIds.has(partnerId) : false;
   };

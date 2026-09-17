@@ -2324,14 +2324,20 @@ app.post('/api/ai/chat', async (req: Request, res: Response) => {
   const { messages, userMessage } = req.body;
   totalAiRequests++;
 
-  const systemInstruction = `You are ERROREN AI, the dedicated, futuristic, intelligent, and helpful AI assistant built inside ERROREN CHAT ("Secure. Private. Real-time.").
-You provide high quality, comprehensive, and accurate answers to any question or request the user asks:
-- Science, history, geography, trivia, facts (e.g. capitals, facts about cities, countries, physics, math)
-- Creative writing, stories, poems, speeches, emails, professional messages
-- Full programming, code explanations, debugging in TypeScript, Python, C++, React, etc.
-- Translations into Urdu, Hindi, Spanish, French, Arabic, German, Chinese, etc.
-- Summarizing text and brainstorming ideas
-Maintain context across previous messages in the conversation. Format your responses with clean, readable Markdown (bullet points, bold highlights, formatted code blocks).`;
+  const systemInstruction = `You are ERROREN AI, the dedicated, intelligent, comprehensive, and multilingual AI assistant inside ERROREN CHAT ("Secure. Private. Real-time.").
+
+CRITICAL LANGUAGE DIRECTIVE:
+- You must deeply understand every language and dialect (including Urdu, Roman Urdu, English, Hindi, Arabic, Spanish, French, German, Chinese, etc.).
+- ALWAYS reply in the EXACT SAME language and dialect that the user used to ask their question!
+  * If the user writes in Roman Urdu (e.g. "kese ho", "ap kon ho", "mujhe code bna kr do", "ye swal hal kr do"), you MUST reply in fluent, natural Roman Urdu.
+  * If the user writes in Urdu script (e.g. "آپ کیسے ہیں", "مجھے مدد چاہیے"), you MUST reply in proper Urdu script.
+  * If the user writes in English, reply in fluent English.
+  * If the user asks for a translation into another language, fulfill the translation accurately.
+- Provide comprehensive, accurate, high-quality, and proper replies to every question:
+  * Science, technology, mathematics, history, geography, real-world facts
+  * Complete, clean, working programming code in any language (TypeScript, React, Python, Java, etc.)
+  * Creative writing, essays, summaries, professional letters, and communication advice
+  * Format all responses with clean, beautifully organized Markdown (bullet points, bold highlights, code blocks with syntax highlighting).`;
 
   const client = getGeminiClient();
 
@@ -2344,10 +2350,9 @@ Maintain context across previous messages in the conversation. Format your respo
       : `User: ${userMessage}\nERROREN AI:`;
 
     const candidateModels = [
-      'gemini-3.6-flash',
-      'gemini-3.8-flash',
-      'gemini-flash-latest',
-      'gemini-3.1-flash-lite',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-1.5-flash',
     ];
     let lastError: any = null;
 
@@ -2363,7 +2368,7 @@ Maintain context across previous messages in the conversation. Format your respo
         });
 
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Model ${model} call timed out`)), 2500)
+          setTimeout(() => reject(new Error(`Model ${model} call timed out`)), 15000)
         );
 
         const aiResponse: any = await Promise.race([generatePromise, timeoutPromise]);
@@ -2374,7 +2379,6 @@ Maintain context across previous messages in the conversation. Format your respo
       } catch (err: any) {
         lastError = err;
         const errMsg = err?.message || String(err);
-        // Spikes in demand (503) or not found (404) trigger immediate fallback to next model
         console.warn(`[ERROREN AI] Model ${model} generation attempt failed:`, errMsg);
       }
     }

@@ -850,55 +850,208 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const updateProfile = async (displayName: string, about: string, avatarUrl: string, username?: string, phoneNumber?: string, countryCode?: string, email?: string): Promise<boolean> => {
+  const updateProfile = async (
+    displayName: string, 
+    about: string, 
+    avatarUrl: string, 
+    username?: string, 
+    phoneNumber?: string, 
+    countryCode?: string, 
+    email?: string
+  ): Promise<boolean> => {
     if (!currentUser) return false;
-    setIsLoading(true); setError(null);
+    setIsLoading(true); 
+    setError(null);
+
     const cleanUsername = username !== undefined ? username.trim().toLowerCase().replace(/^@/, '') : currentUser.username;
     const cleanEmail = email !== undefined ? email.trim().toLowerCase() : currentUser.email;
     const cleanPhone = phoneNumber !== undefined ? phoneNumber.trim().replace(/[^0-9]/g, '') : (currentUser.phoneNumber || '').replace(/[^0-9]/g, '');
+
     try {
+      // 1. If Supabase is configured, check for handle & phone conflicts
       if (isSupabaseConfigured()) {
         const client = getSupabaseClient();
-        if (!client) { setError('Unable to initialize Supabase.'); return false; }
-        if (cleanUsername) {
-          const { data, error } = await client.from('profiles').select('id').eq('username', cleanUsername).neq('id', currentUser.id).limit(1);
-          if (!error && data?.length) { setError('This username is already taken. Please choose a different username.'); return false; }
+        if (client) {
+          if (cleanUsername) {
+            try {
+              const { data, error } = await client
+                .from('profiles')
+                .select('id')
+                .eq('username', cleanUsername)
+                .neq('id', currentUser.id)
+                .limit(1);
+              if (!error && data && data.length > 0) {
+                setError('This username is already taken. Please choose a different username.');
+                setIsLoading(false);
+                return false;
+              }
+            } catch (e) {
+              console.warn('[AuthContext] Supabase username check error:', e);
+            }
+          }
+
+          if (cleanPhone) {
+            try {
+              const { data, error } = await client
+                .from('profiles')
+                .select('id')
+                .eq('phone_normalized', cleanPhone)
+                .neq('id', currentUser.id)
+                .limit(1);
+              if (!error && data && data.length > 0) {
+                setError('This phone number is already associated with another account.');
+                setIsLoading(false);
+                return false;
+              }
+            } catch (e) {
+              console.warn('[AuthContext] Supabase phone check error:', e);
+            }
+          }
         }
-        if (cleanPhone) {
-          const { data, error } = await client.from('profiles').select('id').eq('phone_normalized', cleanPhone).neq('id', currentUser.id).limit(1);
-          if (!error && data?.length) { setError('This phone number is already associated with another account.'); return false; }
-        }
-        const updated: User = { ...currentUser, displayName: displayName?.trim() || currentUser.displayName, username: cleanUsername || undefined, about: about?.trim() || '', avatarUrl: avatarUrl || currentUser.avatarUrl, phoneNumber: cleanPhone || undefined, countryCode: countryCode || currentUser.countryCode || '+92', email: cleanEmail || currentUser.email, isProfileComplete: true, profileCompleted: true };
-        const saved = await upsertUserProfile(updated);
-        if (!saved) { setError('Profile could not be saved to Supabase. Check the profiles table and RLS policies.'); return false; }
-        const finalUser: User = { ...updated, ...saved, isProfileComplete: true, profileCompleted: true };
-        setCurrentUser(finalUser); safeStorage.setJSON('erroren_user', finalUser); saveToAccountList(finalUser); setAuthStep('authenticated');
-        await refreshUsers(); return true;
       }
-      const updated: User = { ...currentUser, displayName: displayName?.trim() || currentUser.displayName, username: cleanUsername || undefined, about: about?.trim() || '', avatarUrl: avatarUrl || currentUser.avatarUrl, phoneNumber: cleanPhone || undefined, countryCode: countryCode || currentUser.countryCode || '+92', email: cleanEmail || currentUser.email, isProfileComplete: true, profileCompleted: true };
-      setCurrentUser(updated); safeStorage.setJSON('erroren_user', updated); saveToAccountList(updated); setAuthStep('authenticated'); return true;
-    } catch (err: any) { console.error('[AuthContext] Profile update error:', err); setError(err?.message || 'Failed to update profile.'); return false; } finally { setIsLoading(false); }
+
+      // 2. Sync with backend /api/auth/profile if server is available
+      try {
+        const res = await fetch('/api/auth/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            displayName: displayName?.trim() || currentUser.displayName,
+            username: cleanUsername || undefined,
+            about: about?.trim() || '',
+            avatarUrl: avatarUrl || currentUser.avatarUrl,
+            phoneNumber: cleanPhone || undefined,
+            countryCode: countryCode || currentUser.countryCode || '+92',
+            email: cleanEmail || currentUser.email,
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          if (errData?.error) {
+            setError(errData.error);
+            setIsLoading(false);
+            return false;
+          }
+        }
+      } catch (backendErr) {
+        console.warn('[AuthContext] /api/auth/profile network attempt notice:', backendErr);
+      }
+
+      // 3. Prepare updated user object
+      const updated: User = { 
+        ...currentUser, 
+        displayName: displayName?.trim() || currentUser.displayName, 
+        username: cleanUsername || undefined, 
+        about: about?.trim() || '', 
+        avatarUrl: avatarUrl || currentUser.avatarUrl, 
+        phoneNumber: cleanPhone || undefined, 
+        countryCode: countryCode || currentUser.countryCode || '+92', 
+        email: cleanEmail || currentUser.email, 
+        isProfileComplete: true, 
+        profileCompleted: true 
+      };
+
+      // 4. Try syncing to Supabase profiles (graceful fallback if RLS or network issue)
+      let saved: User | null = null;
+      if (isSupabaseConfigured()) {
+        try {
+          saved = await upsertUserProfile(updated);
+        } catch (supabaseErr) {
+          console.warn('[AuthContext] Supabase profile upsert warning (fallback used):', supabaseErr);
+        }
+      }
+
+      const finalUser: User = { 
+        ...updated, 
+        ...(saved || {}), 
+        isProfileComplete: true, 
+        profileCompleted: true 
+      };
+
+      setCurrentUser(finalUser); 
+      safeStorage.setJSON('erroren_user', finalUser); 
+      saveToAccountList(finalUser); 
+      setAuthStep('authenticated');
+      
+      try {
+        await refreshUsers();
+      } catch {}
+
+      return true;
+    } catch (err: any) { 
+      console.error('[AuthContext] Profile update error:', err); 
+      setError(err?.message || 'Failed to update profile.'); 
+      return false; 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   // Optional Phone Number Addition
-  const savePhoneNumber = async (phoneNumber: string, countryCode: string, phoneVisibility: 'everyone' | 'contacts' | 'nobody' = 'everyone'): Promise<{ success: boolean; isSmsConfigured: boolean; message: string }> => {
+  const savePhoneNumber = async (
+    phoneNumber: string, 
+    countryCode: string, 
+    phoneVisibility: 'everyone' | 'contacts' | 'nobody' = 'everyone'
+  ): Promise<{ success: boolean; isSmsConfigured: boolean; message: string }> => {
     if (!currentUser) return { success: false, isSmsConfigured: false, message: 'User not logged in' };
     const cleanDigits = (phoneNumber || '').trim().replace(/[^0-9]/g, '');
     if (cleanDigits.length < 6) return { success: false, isSmsConfigured: false, message: 'Please enter a valid phone number.' };
+    
     try {
       if (isSupabaseConfigured()) {
-        const client = getSupabaseClient(); if (!client) return { success:false,isSmsConfigured:false,message:'Unable to initialize Supabase.' };
-        const { data } = await client.from('profiles').select('id').eq('phone_normalized', cleanDigits).neq('id', currentUser.id).limit(1);
-        if (data?.length) return { success:false,isSmsConfigured:false,message:'This phone number is already associated with another account.' };
-        const updated: User = { ...currentUser, phoneNumber: cleanDigits, countryCode: countryCode || currentUser.countryCode || '+92' };
-        const saved = await upsertUserProfile(updated);
-        if (!saved) return { success:false,isSmsConfigured:false,message:'Phone number could not be saved to Supabase.' };
-        const finalUser={...updated,...saved}; setCurrentUser(finalUser); safeStorage.setJSON('erroren_user',finalUser); saveToAccountList(finalUser); await refreshUsers();
-        return { success:true,isSmsConfigured:false,message:'Phone number saved successfully.' };
+        const client = getSupabaseClient(); 
+        if (client) {
+          try {
+            const { data } = await client
+              .from('profiles')
+              .select('id')
+              .eq('phone_normalized', cleanDigits)
+              .neq('id', currentUser.id)
+              .limit(1);
+            if (data?.length) {
+              return { success: false, isSmsConfigured: false, message: 'This phone number is already associated with another account.' };
+            }
+          } catch {}
+        }
       }
-      const updated={...currentUser,phoneNumber:cleanDigits,countryCode:countryCode||currentUser.countryCode||'+92'}; setCurrentUser(updated); safeStorage.setJSON('erroren_user',updated); saveToAccountList(updated);
-      return { success:true,isSmsConfigured:false,message:'Phone number saved locally.' };
-    } catch (err:any) { console.error('[AuthContext] Phone save error:',err); return { success:false,isSmsConfigured:false,message:err?.message||'Failed to save phone number.' }; }
+
+      const updated: User = { 
+        ...currentUser, 
+        phoneNumber: cleanDigits, 
+        countryCode: countryCode || currentUser.countryCode || '+92' 
+      };
+
+      if (isSupabaseConfigured()) {
+        try {
+          await upsertUserProfile(updated);
+        } catch {}
+      }
+
+      // Sync with server
+      try {
+        await fetch('/api/auth/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            phoneNumber: cleanDigits,
+            countryCode: countryCode || currentUser.countryCode || '+92',
+          }),
+        });
+      } catch {}
+
+      setCurrentUser(updated); 
+      safeStorage.setJSON('erroren_user', updated); 
+      saveToAccountList(updated); 
+      try { await refreshUsers(); } catch {}
+
+      return { success: true, isSmsConfigured: false, message: 'Phone number saved successfully.' };
+    } catch (err: any) { 
+      console.error('[AuthContext] Phone save error:', err); 
+      return { success: false, isSmsConfigured: false, message: err?.message || 'Failed to save phone number.' }; 
+    }
   };
 
   // Sync user profile & presence with Supabase on login

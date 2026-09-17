@@ -18,21 +18,50 @@ import {
   Plus,
   Compass,
   ArrowDown,
-  Palette
+  Palette,
+  ArrowLeft
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { User } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
+import { useSocket } from '../../context/SocketContext';
 import { WallpaperModal, WALLPAPER_PRESETS } from '../settings/WallpaperModal';
 import { apiFetch } from '../../utils/api';
 
 function getLocalFallbackAiReply(prompt: string): string {
-  const p = prompt.toLowerCase();
+  const p = prompt.trim().toLowerCase();
+  
+  // Roman Urdu & Hindi checks
+  if (p.includes('kese ho') || p.includes('kaisa hai') || p.includes('kese he') || p.includes('kaise ho') || p.includes('kia hal') || p.includes('kya hal')) {
+    return "Main bilkul theek hoon, shukriya! Main **ERROREN AI** hoon, aapka personal assistant. Aaj main aapki kya madad kar sakta hoon?";
+  }
+  if (p.includes('ap kon ho') || p.includes('tum kon ho') || p.includes('kaun ho') || p.includes('kon ho') || p.includes('kon h')) {
+    return "Main **ERROREN AI** hoon, ERROREN CHAT ka intelligent personal assistant. Main aapke har swal ka jwab, coding, translation, aur har qisam ki madad ke liye tayyar hoon.";
+  }
+  if (p.includes('kya kr skte ho') || p.includes('kya kar sakte ho') || p.includes('kya krte ho') || p.includes('features')) {
+    return "Main har zuban samajhta hoon aur aapki har cheez mein madad kar sakta hoon:\n- **Har swal ka durust jwab**: Science, tareekh, general knowledge, maths, aur facts\n- **Coding & Tech**: TypeScript, React, Python, web development, debugging\n- **Language Translation**: Roman Urdu, Urdu, English, Hindi, Arabic, Spanish, etc.\n- **Writing & Drafting**: Messages, professional emails, essays aur summaries\n\nAap jis zuban mein bhi baat karein, main usi zuban mein accurate jwab dunga!";
+  }
+  if (p.includes('salam') || p.includes('assalam') || p.includes('slm')) {
+    return "Wa Alaikum Assalam! Khush aamdeed. Main **ERROREN AI** hoon. Farmayein, main aapki kya khidmat kar sakta hoon?";
+  }
+
+  // Urdu Script checks
+  if (/[\u0600-\u06FF]/.test(prompt)) {
+    if (prompt.includes('سلام') || prompt.includes('کیسے')) {
+      return "وعلیکم السلام! میں **ERROREN AI** ہوں۔ میں بالکل ٹھیک ہوں۔ بتائیے میں آج آپ کی کس طرح مدد کر سکتا ہوں؟";
+    }
+    if (prompt.includes('کون ہو') || prompt.includes('کیا کرتے ہو')) {
+      return "میں **ERROREN AI** ہوں، ERROREN CHAT کا ذاتی ذہین اسسٹنٹ۔ میں آپ کے تمام سوالات کے درست جوابات، ترجمہ، کوڈنگ، اور تحریری مدد فراہم کر سکتا ہوں۔";
+    }
+    return `آپ کے سوال کا شکریہ! میں **ERROREN AI** ہوں اور آپ کی مدد کے لیے مکمل حاضر ہوں۔ آپ بلا جھجھک کوئی بھی سوال پوچھ سکتے ہیں۔`;
+  }
+
+  // English & general inquiries
   if (p.includes('hello') || p.includes('hi') || p.includes('hey')) {
-    return "Hello! I am **ERROREN AI**, your built-in assistant on ERROREN CHAT. How can I help you today?";
+    return "Hello! I am **ERROREN AI**, your built-in intelligent assistant on ERROREN CHAT. How can I help you today?";
   }
   if (p.includes('who are you') || p.includes('what can you do')) {
-    return "I am **ERROREN AI**, the intelligent assistant built into ERROREN CHAT. I can help you compose messages, answer questions, write code, translate languages, and explain platform features!";
+    return "I am **ERROREN AI**, the intelligent assistant built into ERROREN CHAT. I can answer questions, write code, solve problems, translate between any languages, and assist you with anything you need in real-time!";
   }
   if (p.includes('call') || p.includes('video') || p.includes('audio')) {
     return "In **ERROREN CHAT**, you can make voice and video calls with any registered user by tapping the phone or video icon in the chat header.";
@@ -40,7 +69,7 @@ function getLocalFallbackAiReply(prompt: string): string {
   if (p.includes('contact') || p.includes('add contact')) {
     return "To add a contact, open the **+** (New Chat) dialog, choose **Add Contact**, and input their registered phone number. The platform verifies their registration in real time.";
   }
-  return `Thank you for reaching out! I received your request: "${prompt}". ERROREN AI is active and ready to assist you with messaging, writing, and platform assistance.`;
+  return `Thank you! I received your request: "${prompt}".\n\nI am **ERROREN AI**, ready to assist you with accurate answers, translations, coding, or drafting in whatever language you prefer. How else can I help?`;
 }
 
 interface AiChatMessage {
@@ -52,6 +81,7 @@ interface AiChatMessage {
 
 interface ErrorenAiViewProps {
   currentUser?: User;
+  onBack?: () => void;
 }
 
 const quickPromptsList = [
@@ -96,7 +126,7 @@ const INITIAL_WELCOME: AiChatMessage = {
 
 const STORAGE_KEY = 'erroren_ai_conversation_history';
 
-export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => {
+export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser, onBack }) => {
   const userStorageKey = currentUser?.id ? `${STORAGE_KEY}_${currentUser.id}` : STORAGE_KEY;
 
   const [messages, setMessages] = useState<AiChatMessage[]>(() => {
@@ -120,7 +150,12 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [showWallpaperModal, setShowWallpaperModal] = useState(false);
-  const { getEffectiveWallpaper } = useTheme();
+  const { currentAccent, isDark, getEffectiveWallpaper } = useTheme();
+  const { isConnected, onlineUserIds } = useSocket();
+
+  const isNetOnline = typeof navigator !== 'undefined' ? navigator.onLine : isConnected;
+  const isUserOnline = currentUser?.id ? onlineUserIds.has(currentUser.id) : isNetOnline;
+  const isAiOnline = isNetOnline && (isUserOnline || isConnected);
 
   const currentWallpaper = getEffectiveWallpaper('ai_chat');
 
@@ -341,27 +376,69 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
   const isOnlyGreeting = messages.length <= 1;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#080B11] text-slate-100 overflow-hidden relative select-text">
-      {/* Subtle Background Glows */}
-      <div className="absolute top-0 right-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute bottom-20 left-10 w-80 h-80 bg-indigo-500/10 rounded-full blur-[140px] pointer-events-none" />
+    <div className={`flex-1 flex flex-col h-full overflow-hidden relative select-text transition-colors duration-200 ${
+      isDark ? 'bg-[#080B11] text-slate-100' : 'bg-slate-50 text-slate-900'
+    }`}>
+      {/* Subtle Background Glows matching current accent */}
+      <div 
+        className="absolute top-0 right-1/4 w-96 h-96 rounded-full blur-[140px] pointer-events-none transition-all duration-300"
+        style={{ 
+          backgroundColor: currentAccent.hex, 
+          opacity: isDark ? 0.12 : 0.08 
+        }} 
+      />
+      <div 
+        className="absolute bottom-20 left-10 w-80 h-80 rounded-full blur-[140px] pointer-events-none transition-all duration-300"
+        style={{ 
+          backgroundColor: currentAccent.hex, 
+          opacity: isDark ? 0.08 : 0.05 
+        }} 
+      />
 
       {/* Top Header */}
-      <header className="h-16 px-4 sm:px-6 bg-slate-950/85 border-b border-purple-500/20 backdrop-blur-xl flex items-center justify-between z-20 flex-shrink-0">
+      <header 
+        className={`h-16 px-4 sm:px-6 backdrop-blur-xl flex items-center justify-between z-20 flex-shrink-0 border-b transition-colors duration-200 ${
+          isDark ? 'bg-slate-950/85 border-slate-800/80' : 'bg-white/90 border-slate-200/90 shadow-sm'
+        }`}
+        style={{ borderBottomColor: currentAccent.border }}
+      >
         <div className="flex items-center gap-3">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className={`p-2 -ml-2 rounded-xl transition ${
+                isDark ? 'text-slate-400 hover:text-white hover:bg-slate-800/80' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+              title="Back to conversations"
+              aria-label="Back to conversations"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+          )}
           <Logo size="sm" variant="ai" />
           <div className="flex flex-col">
             <div className="flex items-center gap-2">
-              <span className="text-sm sm:text-base font-bold text-white tracking-wide">
+              <span className={`text-sm sm:text-base font-bold tracking-wide ${
+                isDark ? 'text-white' : 'text-slate-900'
+              }`}>
                 ERROREN AI
               </span>
-              <span className="px-1.5 py-0.2 rounded-full bg-purple-950/80 border border-purple-500/40 text-purple-300 text-[9px] font-bold tracking-wider flex items-center gap-1">
-                <Sparkles className="w-2.5 h-2.5 text-purple-400" /> AI
-              </span>
             </div>
-            <span className="text-[11px] text-purple-300/80 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Online • Ready to assist
+            <span 
+              className={`text-[11px] font-medium flex items-center gap-1.5 ${
+                isAiOnline ? 'text-emerald-400' : 'text-slate-400'
+              }`}
+            >
+              <span 
+                className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                  isAiOnline 
+                    ? 'bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)] ring-1 ring-emerald-400/50' 
+                    : 'bg-slate-400 shadow-none'
+                }`}
+                title={isAiOnline ? 'Online' : 'Offline'}
+              />
+              {isAiOnline ? 'Online • Ready to assist' : 'Offline'}
             </span>
           </div>
         </div>
@@ -369,7 +446,12 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowWallpaperModal(true)}
-            className="p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-purple-300 transition"
+            className={`p-2 rounded-xl border transition ${
+              isDark 
+                ? 'bg-slate-900/90 hover:bg-slate-800 border-slate-800 text-slate-300' 
+                : 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-600'
+            }`}
+            style={{ color: currentAccent.textColor }}
             title="AI Chat Wallpaper"
           >
             <Palette className="w-4 h-4" />
@@ -379,7 +461,11 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
             <button
               onClick={handleRegenerate}
               disabled={isLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 hover:text-purple-300 transition disabled:opacity-40"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs transition disabled:opacity-40 ${
+                isDark 
+                  ? 'bg-slate-900/90 hover:bg-slate-800 border-slate-800 text-slate-300' 
+                  : 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700'
+              }`}
               title="Regenerate Last Answer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -389,7 +475,11 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
 
           <button
             onClick={handleClear}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-500/30 text-xs text-slate-400 hover:text-rose-400 transition"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs transition ${
+              isDark 
+                ? 'bg-slate-900/90 hover:bg-rose-950/40 border-slate-800 hover:border-rose-500/30 text-slate-400 hover:text-rose-400' 
+                : 'bg-slate-100 hover:bg-rose-50 border-slate-200 hover:border-rose-200 text-slate-600 hover:text-rose-600'
+            }`}
             title="Start New Conversation"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -415,7 +505,14 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
               className={`flex gap-2.5 sm:gap-3.5 ${isAi ? 'items-start' : 'items-start justify-end'}`}
             >
               {isAi && (
-                <div className="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-300 flex-shrink-0 mt-1 shadow-sm">
+                <div 
+                  className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-1 shadow-sm border transition-all"
+                  style={{
+                    backgroundColor: currentAccent.softBg,
+                    borderColor: currentAccent.border,
+                    color: currentAccent.textColor
+                  }}
+                >
                   <Sparkles className="w-4 h-4" />
                 </div>
               )}
@@ -423,18 +520,37 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
               <div
                 className={`relative group max-w-[88%] sm:max-w-[80%] rounded-3xl p-4 shadow-md transition-all ${
                   isAi
-                    ? 'bg-slate-900/95 border border-purple-500/30 text-slate-200 shadow-[0_0_15px_rgba(168,85,247,0.06)] rounded-tl-sm'
-                    : 'bg-gradient-to-tr from-purple-700 via-purple-600 to-indigo-600 text-white border border-purple-400/40 rounded-tr-sm'
+                    ? isDark 
+                      ? 'bg-slate-900/95 text-slate-200 rounded-tl-sm' 
+                      : 'bg-white text-slate-800 rounded-tl-sm shadow-sm'
+                    : 'text-white rounded-tr-sm'
                 }`}
+                style={
+                  isAi
+                    ? {
+                        border: `1px solid ${currentAccent.border}`,
+                        boxShadow: isDark ? `0 0 15px ${currentAccent.hex}15` : '0 2px 8px rgba(0,0,0,0.06)',
+                      }
+                    : {
+                        backgroundColor: currentAccent.hex,
+                        color: currentAccent.foreground,
+                        boxShadow: currentAccent.glowShadow,
+                      }
+                }
               >
                 {/* Message Header for AI */}
                 {isAi && (
-                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/80 text-[11px]">
-                    <div className="flex items-center gap-1.5 font-bold text-purple-300">
-                      <Sparkles className="w-3 h-3 text-purple-400" />
+                  <div className={`flex items-center justify-between pb-2 mb-2 border-b text-[11px] ${
+                    isDark ? 'border-slate-800/80' : 'border-slate-200'
+                  }`}>
+                    <div 
+                      className="flex items-center gap-1.5 font-bold"
+                      style={{ color: currentAccent.textColor }}
+                    >
+                      <Sparkles className="w-3 h-3" />
                       <span>ERROREN AI</span>
                     </div>
-                    <span className="text-[10px] text-slate-500 font-mono">
+                    <span className={`text-[10px] font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                       {formatTimestamp(msg.timestamp)}
                     </span>
                   </div>
@@ -443,7 +559,7 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
                 {/* Message Content */}
                 <div className="text-sm leading-relaxed break-words markdown-content">
                   {isAi ? (
-                    <div className="space-y-2 text-slate-200">
+                    <div className={`space-y-2 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
                       <Markdown>{msg.text}</Markdown>
                     </div>
                   ) : (
@@ -453,23 +569,28 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
 
                 {/* User Timestamp */}
                 {!isAi && (
-                  <div className="mt-1.5 text-right text-[10px] text-purple-200/80 font-mono">
+                  <div className="mt-1.5 text-right text-[10px] opacity-80 font-mono">
                     {formatTimestamp(msg.timestamp)}
                   </div>
                 )}
 
                 {/* AI Message Footer Actions */}
                 {isAi && (
-                  <div className="mt-3 pt-2 border-t border-slate-800/70 flex items-center justify-end text-[11px] text-slate-400">
+                  <div className={`mt-3 pt-2 border-t flex items-center justify-end text-[11px] ${
+                    isDark ? 'border-slate-800/70 text-slate-400' : 'border-slate-200 text-slate-500'
+                  }`}>
                     <button
                       onClick={() => handleCopy(msg.text, msg.id)}
-                      className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-800/60 hover:bg-purple-950/60 hover:text-purple-300 text-slate-400 transition"
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition ${
+                        isDark ? 'bg-slate-800/60 border-slate-700/60' : 'bg-slate-100 border-slate-200'
+                      }`}
+                      style={{ color: currentAccent.textColor }}
                       title="Copy message"
                     >
                       {copiedId === msg.id ? (
                         <>
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          <span className="text-emerald-400 text-[10px]">Copied</span>
+                          <Check className="w-3 h-3 text-emerald-500" />
+                          <span className="text-emerald-500 text-[10px]">Copied</span>
                         </>
                       ) : (
                         <>
@@ -483,7 +604,14 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
               </div>
 
               {!isAi && (
-                <div className="w-8 h-8 rounded-xl bg-purple-900/50 border border-purple-500/30 flex items-center justify-center text-purple-200 flex-shrink-0 mt-1">
+                <div 
+                  className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-1 border transition-all"
+                  style={{
+                    backgroundColor: currentAccent.softBg,
+                    borderColor: currentAccent.border,
+                    color: currentAccent.textColor
+                  }}
+                >
                   <UserIcon className="w-4 h-4" />
                 </div>
               )}
@@ -494,12 +622,34 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
         {/* AI Thinking Indicator */}
         {isLoading && (
           <div className="flex gap-2.5 sm:gap-3.5 items-start">
-            <div className="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-300 flex-shrink-0 animate-pulse">
+            <div 
+              className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 animate-pulse border"
+              style={{
+                backgroundColor: currentAccent.softBg,
+                borderColor: currentAccent.border,
+                color: currentAccent.textColor
+              }}
+            >
               <Sparkles className="w-4 h-4" />
             </div>
-            <div className="bg-slate-900/95 border border-purple-500/30 rounded-3xl rounded-tl-sm p-4 flex items-center gap-2.5 text-xs text-purple-300 shadow-md">
-              <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
-              <span className="font-medium animate-pulse">ERROREN AI is thinking...</span>
+            <div 
+              className={`rounded-3xl rounded-tl-sm p-4 flex items-center gap-2.5 text-xs shadow-md border ${
+                isDark ? 'bg-slate-900/95 text-slate-200' : 'bg-white text-slate-800'
+              }`}
+              style={{
+                borderColor: currentAccent.border,
+              }}
+            >
+              <Loader2 
+                className="w-4 h-4 animate-spin" 
+                style={{ color: currentAccent.hex }}
+              />
+              <span 
+                className="font-medium animate-pulse"
+                style={{ color: currentAccent.textColor }}
+              >
+                ERROREN AI is thinking...
+              </span>
             </div>
           </div>
         )}
@@ -507,8 +657,11 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
         {/* Quick Prompts Section in Empty / Initial State */}
         {isOnlyGreeting && (
           <div className="pt-2 pb-4">
-            <div className="flex items-center gap-2 text-xs font-semibold text-purple-300/90 uppercase tracking-wider mb-3">
-              <Compass className="w-3.5 h-3.5 text-purple-400" />
+            <div 
+              className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider mb-3"
+              style={{ color: currentAccent.textColor }}
+            >
+              <Compass className="w-3.5 h-3.5" />
               <span>Quick Shortcuts</span>
             </div>
 
@@ -519,15 +672,30 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
                   <button
                     key={i}
                     onClick={() => selectQuickPrompt(cat.prompt)}
-                    className="text-left p-3.5 rounded-2xl bg-slate-900/80 hover:bg-purple-950/40 border border-slate-800 hover:border-purple-500/40 text-xs text-slate-200 transition group flex flex-col gap-1.5 shadow-sm"
+                    className={`text-left p-3.5 rounded-2xl border text-xs transition group flex flex-col gap-1.5 shadow-sm ${
+                      isDark 
+                        ? 'bg-slate-900/80 hover:bg-slate-800/90 border-slate-800 text-slate-200' 
+                        : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
+                    }`}
                   >
-                    <div className="flex items-center gap-2 text-purple-300 group-hover:text-purple-200 font-bold">
-                      <div className="w-6 h-6 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
-                        <Icon className="w-3.5 h-3.5 text-purple-400" />
+                    <div 
+                      className="flex items-center gap-2 font-bold transition"
+                      style={{ color: currentAccent.textColor }}
+                    >
+                      <div 
+                        className="w-6 h-6 rounded-lg flex items-center justify-center border"
+                        style={{
+                          backgroundColor: currentAccent.softBg,
+                          borderColor: currentAccent.border,
+                        }}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
                       </div>
                       <span>{cat.label}</span>
                     </div>
-                    <span className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
+                    <span className={`text-[11px] line-clamp-2 leading-relaxed ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}>
                       {cat.prompt}
                     </span>
                   </button>
@@ -544,7 +712,12 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
       {showScrollBottom && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-24 right-6 p-2 rounded-full bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-500/30 transition hover:scale-110 z-30"
+          className="absolute bottom-24 right-6 p-2.5 rounded-full text-white shadow-lg transition hover:scale-110 z-30"
+          style={{
+            backgroundColor: currentAccent.hex,
+            boxShadow: currentAccent.glowShadow,
+            color: currentAccent.foreground
+          }}
           title="Scroll to latest"
         >
           <ArrowDown className="w-4 h-4" />
@@ -555,14 +728,22 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
       {!isOnlyGreeting && (
         <div className="max-w-4xl mx-auto w-full px-4 pt-1 pb-1 flex-shrink-0">
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 text-xs">
-            <span className="text-[10px] uppercase font-bold text-purple-400/80 whitespace-nowrap mr-1 flex items-center gap-1">
+            <span 
+              className="text-[10px] uppercase font-bold whitespace-nowrap mr-1 flex items-center gap-1"
+              style={{ color: currentAccent.textColor }}
+            >
               <Sparkles className="w-3 h-3" /> Shortcuts:
             </span>
             {quickPromptsList.map((cat, i) => (
               <button
                 key={i}
                 onClick={() => selectQuickPrompt(cat.prompt)}
-                className="whitespace-nowrap px-3 py-1 rounded-full bg-slate-900/90 hover:bg-purple-950/60 border border-purple-500/20 hover:border-purple-500/40 text-[11px] text-slate-300 hover:text-purple-200 transition"
+                className={`whitespace-nowrap px-3 py-1 rounded-full border text-[11px] transition ${
+                  isDark 
+                    ? 'bg-slate-900/90 hover:bg-slate-800 text-slate-300' 
+                    : 'bg-white hover:bg-slate-100 text-slate-700'
+                }`}
+                style={{ borderColor: currentAccent.border }}
               >
                 {cat.label}
               </button>
@@ -572,10 +753,20 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
       )}
 
       {/* Fixed Bottom Message Composer */}
-      <div className="p-3 sm:p-4 bg-slate-950/95 border-t border-purple-500/20 backdrop-blur-xl max-w-4xl mx-auto w-full flex-shrink-0 z-30">
+      <div 
+        className={`p-3 sm:p-4 backdrop-blur-xl max-w-4xl mx-auto w-full flex-shrink-0 z-30 border-t transition-colors duration-200 ${
+          isDark ? 'bg-slate-950/95 border-slate-800/90' : 'bg-white/95 border-slate-200'
+        }`}
+        style={{ borderTopColor: currentAccent.border }}
+      >
         {/* Attachment & Shortcut Menu */}
         {showAttachMenu && (
-          <div className="mb-2 p-2 rounded-2xl bg-slate-900 border border-purple-500/30 shadow-xl grid grid-cols-2 sm:grid-cols-4 gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
+          <div 
+            className={`mb-2 p-2 rounded-2xl border shadow-xl grid grid-cols-2 sm:grid-cols-4 gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-150 ${
+              isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+            }`}
+            style={{ borderColor: currentAccent.border }}
+          >
             {quickPromptsList.slice(0, 4).map((item, idx) => {
               const Icon = item.icon;
               return (
@@ -585,9 +776,14 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
                     selectQuickPrompt(item.prompt);
                     setShowAttachMenu(false);
                   }}
-                  className="flex items-center gap-2 p-2 rounded-xl hover:bg-purple-950/50 text-left transition text-xs text-slate-300"
+                  className={`flex items-center gap-2 p-2 rounded-xl text-left transition text-xs ${
+                    isDark ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
+                  }`}
                 >
-                  <Icon className="w-3.5 h-3.5 text-purple-400" />
+                  <Icon 
+                    className="w-3.5 h-3.5" 
+                    style={{ color: currentAccent.textColor }}
+                  />
                   <span className="truncate">{item.label}</span>
                 </button>
               );
@@ -608,24 +804,44 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
             onClick={() => setShowAttachMenu((prev) => !prev)}
             className={`p-3 rounded-2xl border transition flex-shrink-0 ${
               showAttachMenu
-                ? 'bg-purple-600 text-white border-purple-400'
-                : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-purple-300 border-slate-800 hover:border-purple-500/30'
+                ? 'text-white'
+                : isDark
+                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-400 border-slate-800'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'
             }`}
+            style={
+              showAttachMenu
+                ? {
+                    backgroundColor: currentAccent.hex,
+                    borderColor: currentAccent.hex,
+                    color: currentAccent.foreground,
+                  }
+                : undefined
+            }
             title="Shortcuts & Templates"
           >
             <Plus className={`w-4 h-4 transition-transform duration-200 ${showAttachMenu ? 'rotate-45' : ''}`} />
           </button>
 
           {/* Textarea Input Container */}
-          <div className="flex-1 min-h-[46px] bg-slate-900 border border-purple-500/30 focus-within:border-purple-400 focus-within:ring-1 focus-within:ring-purple-400/30 rounded-2xl px-3.5 py-2.5 transition flex items-center shadow-inner">
+          <div 
+            className={`flex-1 min-h-[46px] rounded-2xl px-3.5 py-2.5 transition flex items-center shadow-inner border ${
+              isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-300'
+            }`}
+            style={{ borderColor: currentAccent.border }}
+          >
             <textarea
               ref={textareaRef}
               rows={1}
               value={inputPrompt}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder="Write a message..."
-              className="w-full bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none resize-none max-h-28 overflow-y-auto leading-relaxed"
+              placeholder="Write a message in any language..."
+              className={`w-full bg-transparent text-sm focus:outline-none resize-none max-h-28 overflow-y-auto leading-relaxed ${
+                isDark 
+                  ? 'text-slate-100 placeholder:text-slate-500' 
+                  : 'text-slate-900 placeholder:text-slate-400'
+              }`}
             />
           </div>
 
@@ -633,11 +849,16 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser }) => 
           <button
             type="submit"
             disabled={isLoading || !inputPrompt.trim()}
-            className="p-3 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold shadow-lg shadow-purple-500/25 transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none flex-shrink-0 flex items-center justify-center"
+            className="p-3 rounded-2xl font-bold transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none flex-shrink-0 flex items-center justify-center shadow-lg"
+            style={{
+              backgroundColor: currentAccent.hex,
+              color: currentAccent.foreground,
+              boxShadow: currentAccent.glowShadow,
+            }}
             title="Send message"
           >
             {isLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin text-white" />
+              <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Send className="w-4 h-4" />
             )}

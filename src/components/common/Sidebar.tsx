@@ -39,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const mainNavItems = [
     { id: 'chats' as MainTab, label: 'Chats', icon: MessageSquare, badge: unreadCount },
     { id: 'status' as MainTab, label: 'Updates', icon: Radio, dot: hasUnseenStatus },
+    { id: 'ai' as MainTab, label: 'ERROREN AI', icon: Sparkles },
     { id: 'communities' as MainTab, label: 'Communities', icon: Users },
     { id: 'calls' as MainTab, label: 'Calls', icon: Phone },
     { id: 'settings' as MainTab, label: 'Settings', icon: Settings },

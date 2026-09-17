@@ -68,9 +68,17 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
   }, [messages.length, typingUsers[chat.id]]);
 
   // Find partner for direct 1-on-1 chat
+  const isAiChat = chat.id === 'chat_erroren_ai' || chat.id.includes('erroren_ai') || (chat.name || chat.title || '').toLowerCase().includes('erroren ai');
+  const isSelfChat = chat.id.startsWith('chat_self_') || 
+    (chat.name || chat.title || '').toLowerCase().includes('(you)') || 
+    ((chat.memberIds?.length === 1 || chat.participantIds?.length === 1) && (chat.memberIds?.[0] === currentUserId || chat.participantIds?.[0] === currentUserId));
+
   const partnerId = (chat.participantIds || chat.memberIds || []).find((id) => id !== currentUserId);
   const partnerUser = allUsers.find((u) => u.id === partnerId);
-  const isOnline = partnerId ? onlineUserIds.has(partnerId) : false;
+  const isNetOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  const userIsOnline = currentUserId ? onlineUserIds.has(currentUserId) : isNetOnline;
+
+  const isOnline = isAiChat ? isNetOnline : (isSelfChat ? (userIsOnline || isNetOnline) : (partnerId ? onlineUserIds.has(partnerId) : false));
   const isTyping = typingUsers[chat.id];
 
   const handleStartAudioCall = () => {
@@ -167,6 +175,16 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
                   <span className="text-slate-400">
                     {memberCount} members
                   </span>
+                ) : isAiChat ? (
+                  <span className="font-medium text-emerald-400 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                    Online
+                  </span>
+                ) : isSelfChat ? (
+                  <span className="font-medium text-emerald-400 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                    Online
+                  </span>
                 ) : isOnline ? (
                   <span 
                     className="font-medium"
@@ -184,7 +202,7 @@ export const ChatConversation: React.FC<ChatConversationProps> = ({
 
         {/* Top Actions: Audio Call, Video Call, Search, Info/Menu */}
         <div className="flex items-center gap-1 sm:gap-2">
-          {!chat.isGroup && (
+          {!chat.isGroup && !isSelfChat && !isAiChat && (
             <>
               <button
                 onClick={handleStartAudioCall}

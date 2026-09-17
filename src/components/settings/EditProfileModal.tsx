@@ -171,8 +171,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
     try {
       const cleanPhone = phoneNumber.trim();
 
-      // 1. If phone number is being added for the first time
-      if (!isProfileAlreadyCompleted && cleanPhone && cleanPhone !== currentUser.phoneNumber) {
+      // 1. If phone number is being added or updated
+      if (cleanPhone && cleanPhone !== currentUser.phoneNumber) {
         const phoneRes = await savePhoneNumber(cleanPhone, countryCode);
         if (!phoneRes.success) {
           setErrorMsg(phoneRes.message || 'This phone number is already associated with another account.');
@@ -181,12 +181,12 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
         }
       }
 
-      const finalUsername = isProfileAlreadyCompleted ? (currentUser.username || cleanUsername) : cleanUsername;
-      const finalPhone = isProfileAlreadyCompleted ? (currentUser.phoneNumber || cleanPhone) : cleanPhone;
-      const finalCountryCode = isProfileAlreadyCompleted ? (currentUser.countryCode || countryCode) : countryCode;
-      const finalEmail = isProfileAlreadyCompleted ? (currentUser.email || cleanEmail) : cleanEmail;
+      const finalUsername = cleanUsername || currentUser.username;
+      const finalPhone = cleanPhone || currentUser.phoneNumber;
+      const finalCountryCode = countryCode || currentUser.countryCode || '+92';
+      const finalEmail = cleanEmail || currentUser.email;
 
-      // 2. Update Profile (Name, Bio, Avatar, and initial fields if not already completed)
+      // 2. Update Profile (Name, Bio, Avatar, and handles)
       const success = await updateProfile(
         displayName.trim(),
         about.trim(),
@@ -259,7 +259,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
               </h3>
               <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 {isProfileAlreadyCompleted 
-                  ? 'Name & Profile Picture (DP) can be changed anytime. Registered handle and phone are locked.' 
+                  ? 'Update your name, username, bio, and profile photo anytime.' 
                   : 'Name, Username, Phone Number & Gmail are all required to unlock messaging'}
               </p>
             </div>
