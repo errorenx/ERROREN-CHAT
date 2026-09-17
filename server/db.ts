@@ -224,6 +224,69 @@ let dbState: DatabaseSchema = {
 
 const otpStore = new Map<string, OtpRecord>();
 
+// Utility to identify test and mock users on the server
+export function isServerTestUser(u: any): boolean {
+  if (!u) return true;
+  const username = String(u.username || '').toLowerCase().trim().replace(/^@/, '');
+  const displayName = String(u.displayName || u.name || '').toLowerCase().trim();
+  const email = String(u.email || '').toLowerCase().trim();
+  const about = String(u.about || u.bio || '').toLowerCase().trim();
+  const id = String(u.id || '').toLowerCase().trim();
+
+  const blockedUsernames = ['test', 'test2', 'testuser', 'testuser99', 'testperson', 'complete_user'];
+  if (blockedUsernames.includes(username)) return true;
+  if (
+    username.startsWith('test') ||
+    username.endsWith('test') ||
+    username.includes('complete_user') ||
+    username.includes('testperson') ||
+    username.includes('testuser') ||
+    username.includes('mock') ||
+    username.includes('dummy')
+  ) {
+    return true;
+  }
+
+  const blockedNames = ['test', 'test two', 'test user 99', 'test person', 'test complete user', 'complete user'];
+  if (blockedNames.includes(displayName)) return true;
+  if (
+    displayName.includes('test user') ||
+    displayName.includes('test person') ||
+    displayName.includes('test two') ||
+    displayName.includes('test complete') ||
+    displayName.startsWith('test ') ||
+    displayName.endsWith(' test') ||
+    displayName === 'test'
+  ) {
+    return true;
+  }
+
+  if (
+    email.startsWith('test') ||
+    email.includes('testuser') ||
+    email.includes('complete_user') ||
+    email.includes('@test.') ||
+    email.includes('example.com')
+  ) {
+    return true;
+  }
+
+  if (about.includes('testing profile') || about.includes('test profile')) {
+    return true;
+  }
+
+  if (
+    id.startsWith('usr_test') ||
+    id.includes('complete_user') ||
+    id.includes('testuser') ||
+    id.includes('testperson')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 // Clean up any demo or mock users and test chats
 function cleanMockDataIfPresent() {
   const mockUserIds = [
@@ -246,14 +309,10 @@ function cleanMockDataIfPresent() {
     }
   });
 
-  // Remove any user with "test" in their email, username, or displayName
+  // Remove any user matching test criteria
   Object.keys(dbState.users).forEach((uid) => {
     const u = dbState.users[uid];
-    if (!u) return;
-    const name = (u.displayName || '').toLowerCase();
-    const email = (u.email || '').toLowerCase();
-    const username = (u.username || '').toLowerCase();
-    if (name.includes('test') || email.includes('test') || username.includes('test')) {
+    if (!u || isServerTestUser(u)) {
       delete dbState.users[uid];
       delete dbState.contacts[uid];
       delete dbState.aiConversations[uid];
@@ -538,13 +597,14 @@ export const db = {
   },
 
   getAllUsers(): StoredUser[] {
-    return Object.values(dbState.users);
+    return Object.values(dbState.users).filter((u) => !isServerTestUser(u));
   },
 
   searchUsers(query: string, excludeUserId?: string): StoredUser[] {
     const q = query.trim().toLowerCase();
     const cleanQ = query.replace(/[^0-9]/g, '');
     return Object.values(dbState.users).filter((u) => {
+      if (!u || isServerTestUser(u)) return false;
       if (excludeUserId && u.id === excludeUserId) return false;
       if (u.isSuspended) return false;
       if (!q) return true;

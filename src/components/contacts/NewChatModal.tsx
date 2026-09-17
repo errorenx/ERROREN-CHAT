@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { User } from '../../types';
 import { findUserByUsername } from '../../services/supabaseChat';
+import { isTestUser } from '../../utils/testFilter';
 import {
   X,
   Search,
@@ -82,7 +83,7 @@ export const NewChatModal: React.FC<NewChatModalProps> = ({
         const res = await findUserByUsername(raw, currentUser?.id);
         if (isCancelled) return;
 
-        if (res.registered && res.user) {
+        if (res.registered && res.user && !isTestUser(res.user)) {
           setUserCheckStatus({
             checking: false,
             registered: true,
@@ -191,9 +192,9 @@ export const NewChatModal: React.FC<NewChatModalProps> = ({
     onClose();
   };
 
-  // List of all registered users on this website (excluding current user)
+  // List of all registered users on this website (excluding current user and test users)
   const registeredUsers = useMemo(() => {
-    return allUsers.filter((u) => u && u.id && u.id !== currentUser?.id);
+    return allUsers.filter((u) => u && u.id && u.id !== currentUser?.id && !isTestUser(u));
   }, [allUsers, currentUser?.id]);
 
   // Filtered list based on search bar

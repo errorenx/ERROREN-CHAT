@@ -28,6 +28,7 @@ import { Chat, Message, MessageType, ReplyToMessage, StatusStory, CallLog, User 
 import { ToastContainer } from './components/common/Toast';
 import { MessageSquare, Plus } from 'lucide-react';
 import { apiFetch } from './utils/api';
+import { isTestChat, isTestUser } from './utils/testFilter';
 import { isSupabaseConfigured } from './lib/supabase';
 import {
   fetchUserChatsFromSupabase,
@@ -77,11 +78,9 @@ const MainAppContent: React.FC = () => {
     const aiChatId = 'chat_erroren_ai';
     const userHandle = user.username ? `@${user.username}` : (user.displayName || 'user');
 
-    // Remove any test chats or mock artifacts
+    // Remove any test chats or mock artifacts using strict filter
     const filtered = (rawChats || []).filter((c) => {
-      const name = (c.name || c.title || '').toLowerCase();
-      if (name.includes('test') || name === 'janu' || name === 'mani') return false;
-      if (c.id === 'chat_1789026111971_emok' || c.id === 'chat_1789546741695_qsg9') return false;
+      if (isTestChat(c, user.id)) return false;
       return true;
     });
 
@@ -190,10 +189,7 @@ const MainAppContent: React.FC = () => {
         const chatData = await chatRes.json();
         if (Array.isArray(chatData)) {
           const sanitized = sanitizeChatsList(chatData, currentUser);
-          setChats((prev) => {
-            if (prev.length > 0) return sanitizeChatsList(prev, currentUser);
-            return sanitized;
-          });
+          setChats(sanitized);
           if (sanitized.length > 0 && !selectedChatId) {
             setSelectedChatId(sanitized[0].id);
           }
@@ -253,7 +249,15 @@ const MainAppContent: React.FC = () => {
   };
 
   useEffect(() => {
-    loadInitialData();
+    // When account changes or a new profile is created, reset all memory caches so no old chats/files bleed over
+    setSelectedChatId(null);
+    setChats([]);
+    setChatMessages({});
+    setStatuses([]);
+    setCallLogs([]);
+    if (currentUser?.id) {
+      loadInitialData();
+    }
   }, [currentUser?.id]);
 
   // Load messages for active chat + Realtime message subscription

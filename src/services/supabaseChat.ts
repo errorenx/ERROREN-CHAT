@@ -8,6 +8,7 @@ import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 export { isSupabaseConfigured };
 import { User, Contact, Chat, Message, Community, StatusStory, Channel, ChannelPost } from '../types';
 import { getPhoneLookupVariants, normalizePhoneNumber, isPhoneMatch } from '../utils/phoneUtils';
+import { isTestUser } from '../utils/testFilter';
 
 export interface PhoneLookupResult {
   registered: boolean;
@@ -288,7 +289,7 @@ export async function fetchAllRegisteredProfiles(): Promise<User[]> {
       .limit(200);
 
     if (error || !data) return [];
-    return data.map(mapProfileToUser);
+    return data.map(mapProfileToUser).filter((u) => !isTestUser(u));
   } catch {
     return [];
   }

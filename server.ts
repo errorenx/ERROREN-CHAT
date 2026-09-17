@@ -19,6 +19,7 @@ import {
   StoredChannel,
   StoredChannelPost
 } from './server/db';
+import { generateMultilingualReply, detectLanguage } from './src/utils/aiLanguageEngine';
 
 dotenv.config();
 
@@ -2324,15 +2325,23 @@ app.post('/api/ai/chat', async (req: Request, res: Response) => {
   const { messages, userMessage } = req.body;
   totalAiRequests++;
 
+  const detectedUserLang = detectLanguage(userMessage || '');
+
   const systemInstruction = `You are ERROREN AI, the dedicated, intelligent, comprehensive, and multilingual AI assistant inside ERROREN CHAT ("Secure. Private. Real-time.").
 
-CRITICAL LANGUAGE DIRECTIVE:
-- You must deeply understand every language and dialect (including Urdu, Roman Urdu, English, Hindi, Arabic, Spanish, French, German, Chinese, etc.).
+CRITICAL DYNAMIC LANGUAGE DIRECTIVE (HIGHEST PRIORITY):
+- User Question Language Detected: ${detectedUserLang.toUpperCase()}
 - ALWAYS reply in the EXACT SAME language and dialect that the user used to ask their question!
-  * If the user writes in Roman Urdu (e.g. "kese ho", "ap kon ho", "mujhe code bna kr do", "ye swal hal kr do"), you MUST reply in fluent, natural Roman Urdu.
-  * If the user writes in Urdu script (e.g. "آپ کیسے ہیں", "مجھے مدد چاہیے"), you MUST reply in proper Urdu script.
-  * If the user writes in English, reply in fluent English.
-  * If the user asks for a translation into another language, fulfill the translation accurately.
+- If the user writes in Roman Urdu (Urdu in English alphabet, e.g. "kese ho", "ap kon ho", "mujhe code bna kr do", "ye swal hal kr do", "bhai suno"):
+  * You MUST reply in fluent, natural, respectful Roman Urdu.
+  * Do NOT reply in English or Devanagari Hindi or Arabic script.
+  * Example style: "Main bilkul theek hoon! Aap batayein aaj main aapki kya madad kar sakta hoon?"
+- If the user writes in Urdu script (e.g. "آپ کیسے ہیں", "مجھے مدد چاہیے"):
+  * You MUST reply in fluent, grammatically proper Urdu script.
+- If the user writes in English:
+  * Reply in articulate, structured English.
+- If the user writes in Hindi or Arabic or another language:
+  * Reply in that exact language.
 - Provide comprehensive, accurate, high-quality, and proper replies to every question:
   * Science, technology, mathematics, history, geography, real-world facts
   * Complete, clean, working programming code in any language (TypeScript, React, Python, Java, etc.)
@@ -2346,8 +2355,8 @@ CRITICAL LANGUAGE DIRECTIVE:
       .map((m: any) => `${m.role === 'user' ? 'User' : 'ERROREN AI'}: ${m.content}`)
       .join('\n');
     const prompt = formattedHistory
-      ? `${formattedHistory}\nUser: ${userMessage}\nERROREN AI:`
-      : `User: ${userMessage}\nERROREN AI:`;
+      ? `${formattedHistory}\nUser: ${userMessage}\n[Instruction: Reply in ${detectedUserLang.toUpperCase()}]\nERROREN AI:`
+      : `User: ${userMessage}\n[Instruction: Reply in ${detectedUserLang.toUpperCase()}]\nERROREN AI:`;
 
     const candidateModels = [
       'gemini-2.5-flash',
@@ -2383,32 +2392,14 @@ CRITICAL LANGUAGE DIRECTIVE:
       }
     }
 
-    console.warn('[ERROREN AI Notice] Candidate Gemini models temporarily busy or unavailable, serving intelligent fallback:', lastError?.message || lastError);
+    console.warn('[ERROREN AI Notice] Candidate Gemini models temporarily busy or unavailable, serving intelligent multilingual engine:', lastError?.message || lastError);
   } else {
-    console.warn('[ERROREN AI Production Warning] No Gemini client initialized. Check GEMINI_API_KEY environment variable.');
+    console.warn('[ERROREN AI Production Warning] No Gemini client initialized. Check GEMINI_API_KEY environment variable. Serving multilingual intelligence engine.');
   }
 
-  // Smart fallback engine if API key is temporarily rate limited or not yet configured
-  const q = (userMessage || '').toLowerCase();
-  let fallbackReply = `I am **ERROREN AI**, your AI copilot. I processed your request: "${userMessage}".\n\nHow else can I assist you today? Feel free to ask any question or request translations, code, or drafting!`;
-
-  if (q.includes('pakistan') && (q.includes('capital') || q.includes('fact'))) {
-    fallbackReply = `**Islamabad** is the capital city of Pakistan.\n\nHere are 5 interesting facts about Islamabad:\n1. **Planned Masterpiece**: Built in the 1960s to replace Karachi as the federal capital, designed by renowned Greek architect Constantinos Apostolou Doxiadis.\n2. **Margalla Hills Backdrop**: Nestled at the foothills of the scenic Margalla Hills National Park, renowned for its greenery and hiking trails.\n3. **Faisal Mosque**: Home to the iconic Faisal Mosque, shaped like a Bedouin desert tent, which was once the largest mosque in the world.\n4. **High Standard of Living**: Consistently ranked among the cleanest, safest, and most developed cities in South Asia.\n5. **Sector Grid System**: Organized systematically into designated sectors (E, F, G, H, I) divided into four sub-sectors with central commercial markets.`;
-  } else if (q.includes('capital') && q.includes('pakistan')) {
-    fallbackReply = "**Islamabad** is the federal capital of Pakistan, nestled at the foot of the picturesque Margalla Hills.";
-  } else if (q.includes('story') || q.includes('kahani')) {
-    fallbackReply = `### The Whispering Signal\n\nIn the heart of a neon-lit cyberpunk metropolis, a solitary programmer named Maya noticed an anomalous encrypted packet pulsing through the quantum network. Unlike ordinary binary streams, this transmission carried a self-assembling lattice of light.\n\nWhen she decrypted the payload, it revealed a lost message from the architects of the deep net: *"True connection transcends distance when encrypted by trust."* From that night forward, her communications were shielded forever.`;
-  } else if (q.includes('translate') || q.includes('urdu')) {
-    fallbackReply = `**Translation:**\n- **English:** "${userMessage}"\n- **Urdu:** "ERROREN AI آپ کے لیے ہر لمحہ حاضر ہے۔"\n- **Spanish:** "ERROREN AI está listo para ayudarte en todo momento."`;
-  } else if (q.includes('code') || q.includes('typescript') || q.includes('javascript') || q.includes('python')) {
-    fallbackReply = `Here is a clean code implementation for your request:\n\n\`\`\`typescript\n// ERROREN AI Utility Module\nexport async function askErrorenAi(prompt: string): Promise<string> {\n  const response = await fetch('/api/ai/chat', {\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ userMessage: prompt }),\n  });\n  const data = await response.json();\n  return data.reply;\n}\n\`\`\`\n\nLet me know if you would like me to customize or expand this logic!`;
-  } else if (q.includes('hello') || q.includes('hi') || q.includes('hey')) {
-    fallbackReply = "Hello! I am **ERROREN AI**. How can I help you today? You can ask me any question, request code, translations, stories, or creative advice!";
-  } else if (q.includes('who are you') || q.includes('tum kon ho')) {
-    fallbackReply = "I am **ERROREN AI**, your built-in intelligence assistant inside ERROREN CHAT. I am here to assist you with answering questions, problem solving, programming, writing, and language translations.";
-  }
-
-  return res.json({ success: true, reply: fallbackReply, isFallback: true });
+  // Intelligent multilingual engine matching user's exact language (Roman Urdu, Urdu, English, Hindi, Arabic, etc.)
+  const reply = generateMultilingualReply(userMessage || '');
+  return res.json({ success: true, reply, isFallback: true, language: detectedUserLang });
 });
 
 app.post('/api/ai/assist', async (req: Request, res: Response) => {

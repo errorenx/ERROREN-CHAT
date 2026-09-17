@@ -14,6 +14,7 @@ import {
   fetchAllRegisteredProfiles,
   fetchProfileById,
 } from '../services/supabaseChat';
+import { isTestUser, purgeLocalTestUsersAndArtifacts, filterRealUsers } from '../utils/testFilter';
 
 export type AuthStep = 'welcome' | 'google_login' | 'profile' | 'authenticated';
 
@@ -121,14 +122,20 @@ const defaultSettings: UserSettings = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Purge test data on start
+  purgeLocalTestUsersAndArtifacts();
+
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const parsed = safeStorage.getJSON<User | null>('erroren_user', null);
-    return parsed && parsed.id ? parsed : null;
+    if (parsed && parsed.id && !isTestUser(parsed)) {
+      return parsed;
+    }
+    return null;
   });
 
   const [authStep, setAuthStep] = useState<AuthStep>(() => {
     const parsed = safeStorage.getJSON<User | null>('erroren_user', null);
-    if (parsed && parsed.id) {
+    if (parsed && parsed.id && !isTestUser(parsed)) {
       if (!parsed.displayName || parsed.displayName === 'New Member') {
         return 'profile';
       }
@@ -139,15 +146,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [savedAccounts, setSavedAccounts] = useState<User[]>(() => {
     const saved = safeStorage.getJSON<User[]>('erroren_saved_accounts', []);
-    if (Array.isArray(saved) && saved.length > 0) return saved;
+    const filtered = filterRealUsers(saved);
+    if (filtered.length > 0) return filtered;
     const current = safeStorage.getJSON<User | null>('erroren_user', null);
-    if (current && current.id) return [current];
+    if (current && current.id && !isTestUser(current)) return [current];
     return [];
   });
 
   const saveToAccountList = (user: User) => {
+    if (isTestUser(user)) return;
     setSavedAccounts((prev) => {
-      const filtered = prev.filter((u) => u.id !== user.id);
+      const filtered = prev.filter((u) => u.id !== user.id && !isTestUser(u));
       const next = [user, ...filtered];
       safeStorage.setJSON('erroren_saved_accounts', next);
       return next;
@@ -470,6 +479,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const refreshUsers = async () => {
+    purgeLocalTestUsersAndArtifacts();
     let collectedUsers: User[] = [];
 
     // 1. Supabase first
@@ -513,10 +523,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch {}
 
-    // Deduplicate by ID and username
+    // Deduplicate by ID and username, and exclude test users strictly
     const uniqueMap = new Map<string, User>();
     for (const u of collectedUsers) {
-      if (!u || !u.id) continue;
+      if (!u || !u.id || isTestUser(u)) continue;
       const key = (u.username || u.id).toLowerCase();
       if (!uniqueMap.has(key)) {
         uniqueMap.set(key, u);
@@ -524,10 +534,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const merged = Array.from(uniqueMap.values());
-    if (merged.length > 0) {
-      setAllUsers(merged);
-      safeStorage.setJSON('erroren_all_users', merged);
-    }
+    setAllUsers(merged);
+    safeStorage.setJSON('erroren_all_users', merged);
   };
 
   const refreshContacts = async () => {
@@ -1366,7 +1374,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     }
     setCurrentUser(null);
+    setContacts([]);
     safeStorage.removeItem('erroren_user');
+    purgeLocalTestUsersAndArtifacts();
     setAuthStep('welcome');
   };
 
