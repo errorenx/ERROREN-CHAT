@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content" />
+    <title>ERROREN CHAT</title>
+    <meta name="description" content="Secure, private, real-time messaging, audio/video calls, status stories, groups, and ERROREN AI assistant." />
+    <meta property="og:title" content="ERROREN CHAT" />
+    <meta property="og:description" content="Secure, private, real-time messaging, audio/video calls, status stories, groups, and ERROREN AI assistant." />
+    <meta name="theme-color" content="#070A0F" />
+    
+    <!-- PWA & Mobile Web App -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ERROREN CHAT" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="manifest" href="./manifest.json" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+      // 1. Dynamic Base & Trailing Slash resolution for GitHub Pages
+      (function() {
+        var l = window.location;
+        var p = l.pathname;
+        var hostname = l.hostname;
+
+        // If hosted on GitHub Pages (e.g., username.github.io/repo-name)
+        if (hostname.indexOf('github.io') !== -1) {
+          var segments = p.split('/').filter(Boolean);
+          // If in project repository subfolder and missing trailing slash, enforce trailing slash
+          if (segments.length >= 1 && !p.endsWith('/') && !segments[segments.length - 1].includes('.')) {
+            l.replace(l.protocol + '//' + l.host + p + '/' + (l.search || '') + (l.hash || ''));
+            return;
+          }
+
+          // Insert dynamic base tag if repo subpath exists to prevent asset resolution 404s
+          if (segments.length >= 1 && segments[0] !== hostname.split('.')[0]) {
+            var base = document.createElement('base');
+            base.href = '/' + segments[0] + '/';
+            document.head.appendChild(base);
+          }
+        }
+      })();
+
+      // 2. Single Page App redirect handler for GitHub Pages (restores path from 404.html if redirected)
+      (function(l) {
+        if (l.search && l.search.length > 1 && l.search[1] === '/') {
+          var decoded = l.search.slice(1).split('&').map(function(s) { 
+            return s.replace(/~and~/g, '&');
+          }).join('?');
+          var basePath = l.pathname.endsWith('/') ? l.pathname.slice(0, -1) : l.pathname;
+          window.history.replaceState(null, null,
+              basePath + decoded + (l.hash || '')
+          );
+        }
+      }(window.location));
+
+      // 3. Gracefully handle errors and prevent blank screens (including script load 404s)
+      window.addEventListener('error', function(event) {
+        var target = event.target;
+        var loader = document.getElementById('app-initial-loader');
+        if (loader && !window.__APP_MOUNTED__) {
+          var msg = 'Failed to load script assets';
+          if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+            msg = 'Resource failed to load: ' + (target.src || target.href);
+          } else if (event && event.message) {
+            msg = event.message;
+          }
+          var desc = document.getElementById('app-loader-desc');
+          var errBox = document.getElementById('app-loader-error');
+          var actions = document.getElementById('app-loader-actions');
+          if (desc) desc.textContent = 'Application failed to initialize';
+          if (errBox) {
+            errBox.style.display = 'block';
+            errBox.textContent = msg;
+          }
+          if (actions) actions.style.display = 'flex';
+        }
+      }, true);
+
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var msg = (reason && (reason.message || (typeof reason === 'string' ? reason : ''))) || '';
+        if (msg.indexOf('WebSocket closed without opened') !== -1 || msg.indexOf('[vite]') !== -1) {
+          event.preventDefault();
+        }
+      });
+
+      // 4. Watchdog fallback: If not mounted within 5 seconds, present helpful recovery buttons
+      setTimeout(function() {
+        if (!window.__APP_MOUNTED__) {
+          var loader = document.getElementById('app-initial-loader');
+          if (loader) {
+            var desc = document.getElementById('app-loader-desc');
+            var actions = document.getElementById('app-loader-actions');
+            if (desc) desc.textContent = 'Connecting to server / cache...';
+            if (actions) actions.style.display = 'flex';
+          }
+        }
+      }, 4500);
+    </script>
+  </head>
+  <body style="background-color: #070A0F; color: #F1F5F9; min-height: 100vh; margin: 0;" class="bg-[#070A0F] text-slate-100 antialiased selection:bg-emerald-500/30 selection:text-emerald-200 overflow-x-hidden font-sans">
+    <div id="root">
+      <div id="app-initial-loader" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; background-color: #070A0F; color: #94A3B8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 20px; box-sizing: border-box;">
+        <style>
+          @keyframes app-spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        </style>
+        <div style="width: 44px; height: 44px; border: 3px solid rgba(16, 185, 129, 0.2); border-top-color: #10B981; border-radius: 50%; animation: app-spin 0.8s linear infinite; margin-bottom: 16px;"></div>
+        <div style="font-size: 16px; font-weight: 700; letter-spacing: 0.08em; color: #F8FAFC; text-transform: uppercase;">ERROREN CHAT</div>
+        <div id="app-loader-desc" style="margin-top: 6px; font-size: 13px; color: #64748B;">Starting application...</div>
+        <div id="app-loader-error" style="display: none; margin-top: 12px; max-width: 400px; padding: 10px 14px; background-color: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px; font-family: monospace; font-size: 11px; color: #FCA5A5; word-break: break-word;"></div>
+        <div id="app-loader-actions" style="display: none; margin-top: 16px; gap: 8px;">
+          <button onclick="window.location.reload()" style="background-color: #10B981; color: #022c22; font-weight: 700; font-size: 12px; padding: 8px 16px; border-radius: 10px; border: none; cursor: pointer;">Reload Page</button>
+          <button onclick="try{localStorage.clear()}catch(e){}window.location.reload()" style="background-color: #1E293B; color: #CBD5E1; font-weight: 600; font-size: 12px; padding: 8px 16px; border-radius: 10px; border: 1px solid #334155; cursor: pointer;">Clear Cache & Reload</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

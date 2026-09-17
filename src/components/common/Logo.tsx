@@ -1,0 +1,116 @@
+import React from 'react';
+import { useTheme } from '../../context/ThemeContext';
+
+interface LogoProps {
+  size?: 'sm' | 'md' | 'lg' | 'xl';
+  variant?: 'chat' | 'ai';
+  showText?: boolean;
+  className?: string;
+}
+
+export const Logo: React.FC<LogoProps> = ({
+  size = 'md',
+  variant = 'chat',
+  showText = true,
+  className = '',
+}) => {
+  const { currentAccent } = useTheme();
+
+  const sizeMap = {
+    sm: 'w-7 h-7',
+    md: 'w-9 h-9',
+    lg: 'w-12 h-12',
+    xl: 'w-20 h-20',
+  };
+
+  const textMap = {
+    sm: 'text-base',
+    md: 'text-lg',
+    lg: 'text-2xl',
+    xl: 'text-3xl',
+  };
+
+  const isAi = variant === 'ai';
+
+  return (
+    <div className={`flex items-center gap-2.5 select-none ${className}`}>
+      <div className={`relative flex items-center justify-center rounded-2xl p-1 shadow-lg transition-transform duration-300 hover:scale-105 ${sizeMap[size]}`}>
+        {/* Glow Layer */}
+        <div
+          className="absolute inset-0 rounded-2xl opacity-60 blur-md transition-colors duration-300"
+          style={{
+            backgroundColor: isAi ? '#8B5CF6' : currentAccent.hex,
+          }}
+        />
+
+        {/* SVG Graphic */}
+        <div className="relative z-10 w-full h-full flex items-center justify-center">
+          {isAi ? (
+            // Original ERROREN AI Futuristic Purple Glyph
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full drop-shadow-md">
+              <defs>
+                <linearGradient id="aiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#C084FC" />
+                  <stop offset="50%" stopColor="#8B5CF6" />
+                  <stop offset="100%" stopColor="#6366F1" />
+                </linearGradient>
+              </defs>
+              <rect x="6" y="6" width="88" height="88" rx="24" fill="#0F0C20" stroke="#7C3AED" strokeWidth="4" />
+              {/* Futuristic Spark Core */}
+              <path d="M50 20 L58 42 L80 50 L58 58 L50 80 L42 58 L20 50 L42 42 Z" fill="url(#aiGrad)" />
+              <circle cx="50" cy="50" r="6" fill="#FFFFFF" />
+              <circle cx="28" cy="28" r="3" fill="#A855F7" />
+              <circle cx="72" cy="28" r="3" fill="#38BDF8" />
+              <circle cx="72" cy="72" r="3" fill="#C084FC" />
+              <circle cx="28" cy="72" r="3" fill="#6366F1" />
+            </svg>
+          ) : (
+            // Original ERROREN CHAT Cyber Shield Glyph
+            <svg viewBox="0 0 100 100" fill="none" className="w-full h-full drop-shadow-md">
+              <defs>
+                <linearGradient id="chatGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor={currentAccent.hex} />
+                  <stop offset="50%" stopColor={currentAccent.textColor} />
+                  <stop offset="100%" stopColor={currentAccent.hoverHex} />
+                </linearGradient>
+              </defs>
+              <rect x="6" y="6" width="88" height="88" rx="24" fill="#071318" stroke={currentAccent.hex} strokeWidth="4" />
+              {/* Outer Cyber Shield */}
+              <path d="M50 16 L78 30 V52 C78 68 66 80 50 84 C34 80 22 68 22 52 V30 Z" stroke="url(#chatGrad)" strokeWidth="4" fill="none" />
+              {/* Inner Chat Nodes */}
+              <circle cx="40" cy="48" r="4" fill={currentAccent.hex} />
+              <circle cx="50" cy="48" r="4" fill={currentAccent.textColor} />
+              <circle cx="60" cy="48" r="4" fill={currentAccent.hoverHex} />
+              <path d="M38 58 Q50 64 62 58" stroke={currentAccent.hex} strokeWidth="3" strokeLinecap="round" fill="none" />
+            </svg>
+          )}
+        </div>
+      </div>
+
+      {showText && (
+        <div className="flex flex-col leading-tight">
+          <div className="flex items-center gap-1.5">
+            <span className={`font-extrabold tracking-wider font-mono ${textMap[size]} ${isAi ? 'text-purple-300' : 'text-slate-100'}`}>
+              ERROREN
+            </span>
+            <span 
+              className={`font-semibold tracking-wide text-xs px-1.5 py-0.5 rounded-md border`}
+              style={
+                isAi 
+                  ? { backgroundColor: 'rgba(168, 85, 247, 0.2)', color: '#D8B4FE', borderColor: 'rgba(168, 85, 247, 0.3)' }
+                  : { backgroundColor: currentAccent.softBg, color: currentAccent.textColor, borderColor: currentAccent.border }
+              }
+            >
+              {isAi ? 'AI' : 'CHAT'}
+            </span>
+          </div>
+          {size !== 'sm' && (
+            <span className="text-[10px] tracking-widest uppercase font-medium text-slate-400">
+              {isAi ? 'INTELLIGENT ASSISTANT' : 'SECURE • PRIVATE • REAL-TIME'}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
