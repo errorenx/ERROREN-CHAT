@@ -20,54 +20,88 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- 1. Immediate GitHub Pages Base Path & Trailing Slash Fixer (Must run before any assets load) -->
     <script>
-      // 1. Trailing slash resolution for GitHub Pages project repositories
       (function() {
         var l = window.location;
         var p = l.pathname;
-        var hostname = l.hostname;
+        var h = l.hostname;
 
-        // If hosted on GitHub Pages (e.g., username.github.io/repo-name)
-        if (hostname.indexOf('github.io') !== -1) {
+        // Check if hosted on GitHub Pages (*.github.io)
+        if (h.indexOf('github.io') !== -1) {
           var segments = p.split('/').filter(Boolean);
-          // If in project repository subfolder and missing trailing slash, enforce trailing slash
-          if (segments.length >= 1 && !p.endsWith('/') && !segments[segments.length - 1].includes('.')) {
-            l.replace(l.protocol + '//' + l.host + p + '/' + (l.search || '') + (l.hash || ''));
+          var userPrefix = h.split('.')[0];
+          
+          // If in a project repository (e.g., user.github.io/repo-name)
+          if (segments.length > 0 && segments[0].toLowerCase() !== userPrefix.toLowerCase()) {
+            var repo = segments[0];
+            var repoBase = '/' + repo + '/';
+
+            // A. If missing trailing slash on repo root (e.g. user.github.io/repo), enforce it immediately
+            // Otherwise, relative assets like ./assets/... will resolve to user.github.io/assets/... (404 blank page)
+            if (!p.endsWith('/') && !p.substring(p.lastIndexOf('/')).includes('.')) {
+              l.replace(l.protocol + '//' + l.host + '/' + repo + '/' + (l.search || '') + (l.hash || ''));
+              return;
+            }
+
+            // B. Ensure a <base> tag exists pointing to the repository subdirectory
+            if (!document.querySelector('base')) {
+              var baseEl = document.createElement('base');
+              baseEl.href = repoBase;
+              if (document.head) {
+                document.head.insertBefore(baseEl, document.head.firstChild);
+              }
+            }
           }
         }
-      })();
 
-      // 2. Single Page App redirect handler for GitHub Pages (restores path from 404.html if redirected)
-      (function(l) {
+        // C. Restore SPA path from 404.html redirection if present
         if (l.search && l.search.length > 1 && l.search[1] === '/') {
           var decoded = l.search.slice(1).split('&').map(function(s) { 
             return s.replace(/~and~/g, '&');
           }).join('?');
           var basePath = l.pathname.endsWith('/') ? l.pathname.slice(0, -1) : l.pathname;
-          window.history.replaceState(null, null,
-              basePath + decoded + (l.hash || '')
-          );
+          window.history.replaceState(null, null, basePath + decoded + (l.hash || ''));
         }
-      }(window.location));
+      })();
+    </script>
 
-      // 3. Gracefully handle errors and prevent blank screens (including script load 404s)
+    <!-- 2. Robust Client Error Interceptor & Diagnostic Display -->
+    <script>
+      // Gracefully handle errors and prevent blank screens (including script load 404s or source-branch deploys)
       window.addEventListener('error', function(event) {
         var target = event.target;
         var loader = document.getElementById('app-initial-loader');
         if (loader && !window.__APP_MOUNTED__) {
           var msg = 'Failed to load script assets';
+          var isSourceDeployError = false;
           if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
-            msg = 'Resource failed to load: ' + (target.src || target.href);
+            var url = target.src || target.href || '';
+            if (url.indexOf('main.tsx') !== -1) {
+              isSourceDeployError = true;
+            }
+            msg = 'Resource failed to load: ' + url;
           } else if (event && event.message) {
             msg = event.message;
+            if (msg.indexOf('main.tsx') !== -1 || msg.indexOf('MIME type') !== -1) {
+              isSourceDeployError = true;
+            }
           }
           var desc = document.getElementById('app-loader-desc');
           var errBox = document.getElementById('app-loader-error');
           var actions = document.getElementById('app-loader-actions');
-          if (desc) desc.textContent = 'Application failed to initialize';
+          if (desc) {
+            desc.textContent = isSourceDeployError 
+              ? 'GitHub Pages Source Branch Notice'
+              : 'Application failed to initialize';
+          }
           if (errBox) {
             errBox.style.display = 'block';
-            errBox.textContent = msg;
+            if (isSourceDeployError) {
+              errBox.innerHTML = '<strong>Deployment Warning:</strong> GitHub Pages is currently serving the uncompiled source code from <code>main</code> branch instead of the production build.<br><br><strong>To Fix:</strong> In your GitHub repository, go to <strong>Settings &rarr; Pages</strong>. Under <em>Build and deployment &rarr; Source</em>, select <strong>GitHub Actions</strong> (or choose branch <strong>gh-pages</strong> and folder <strong>/ (root)</strong>).';
+            } else {
+              errBox.textContent = msg;
+            }
           }
           if (actions) actions.style.display = 'flex';
         }
@@ -81,7 +115,7 @@
         }
       });
 
-      // 4. Watchdog fallback: If not mounted within 5 seconds, present helpful recovery buttons
+      // Watchdog fallback: If not mounted within 5 seconds, present helpful recovery buttons
       setTimeout(function() {
         if (!window.__APP_MOUNTED__) {
           var loader = document.getElementById('app-initial-loader');

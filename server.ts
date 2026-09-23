@@ -57,18 +57,29 @@ function getGeminiClient(): GoogleGenAI | null {
     ''
   ).trim();
 
-  if (!apiKey) {
+  try {
+    return new GoogleGenAI(
+      apiKey
+        ? {
+            apiKey,
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              },
+            },
+          }
+        : {
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              },
+            },
+          }
+    );
+  } catch (err) {
+    console.warn('[ERROREN AI] Failed to initialize Gemini client:', err);
     return null;
   }
-
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
 }
 
 // Track AI requests
@@ -2359,9 +2370,9 @@ CRITICAL DYNAMIC LANGUAGE DIRECTIVE (HIGHEST PRIORITY):
       : `User: ${userMessage}\n[Instruction: Reply in ${detectedUserLang.toUpperCase()}]\nERROREN AI:`;
 
     const candidateModels = [
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-      'gemini-1.5-flash',
+      'gemini-3.8-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
     ];
     let lastError: any = null;
 
@@ -2423,10 +2434,9 @@ app.post('/api/ai/assist', async (req: Request, res: Response) => {
     }
 
     const candidateModels = [
-      'gemini-3.6-flash',
       'gemini-3.8-flash',
-      'gemini-flash-latest',
-      'gemini-3.1-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
     ];
     for (const model of candidateModels) {
       try {

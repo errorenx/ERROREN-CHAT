@@ -45,6 +45,7 @@ jobs:
       - name: Deploy to gh-pages branch (branch deployment fallback)
         uses: peaceiris/actions-gh-pages@v4
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        continue-on-error: true
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
