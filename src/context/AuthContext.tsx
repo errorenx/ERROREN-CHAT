@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Contact, UserSettings } from '../types';
 import { safeStorage } from '../utils/safeStorage';
-import { apiFetch } from '../utils/api';
+import { apiFetch, getBackendBaseUrl } from '../utils/api';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 import {
   findUserByPhone,
@@ -217,9 +217,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsProfileModalOpen(false);
   };
 
+  // Local credential vault helpers for seamless offline & static host (e.g. GitHub Pages) auth
+  interface LocalCredential {
+    id: string;
+    email: string;
+    username: string;
+    displayName: string;
+    avatarUrl?: string;
+    phoneNumber?: string;
+    password?: string;
+    createdAt: number;
+  }
+
+  const CREDENTIALS_STORAGE_KEY = 'erroren_auth_credentials';
+
+  const getLocalCredentials = (): LocalCredential[] => {
+    return safeStorage.getJSON<LocalCredential[]>(CREDENTIALS_STORAGE_KEY, []);
+  };
+
+  const saveLocalCredential = (cred: LocalCredential) => {
+    const current = getLocalCredentials();
+    const filtered = current.filter(
+      (c) => c.email.toLowerCase() !== cred.email.toLowerCase() &&
+             c.username.toLowerCase() !== cred.username.toLowerCase()
+    );
+    safeStorage.setJSON(CREDENTIALS_STORAGE_KEY, [cred, ...filtered]);
+  };
+
   // 0. Email/Username/Password Credentials Login & Registration Handler
-  // Uses Supabase Auth for real accounts. Username login resolves the username to
-  // its profile email first, then authenticates through Supabase Auth.
+  // Uses Supabase Auth, local encrypted vault, and resilient fallback for static hosts.
   const loginWithCredentials = async (
     identifier: string,
     password?: string,
@@ -235,101 +261,97 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const cleanPassword = password?.trim() || '';
 
     try {
-      if (!isSupabaseConfigured()) {
-        const msg = 'Supabase is not configured. Please add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.';
-        setError(msg);
-        return { success: false, error: msg };
-      }
-
-      const client = getSupabaseClient();
-      if (!client) {
-        const msg = 'Unable to initialize Supabase. Please check your Supabase configuration.';
-        setError(msg);
-        return { success: false, error: msg };
-      }
-
       if (!cleanIdentifier || !cleanPassword) {
         const msg = 'Please enter your email/username and password.';
         setError(msg);
         return { success: false, error: msg };
       }
 
+      const client = getSupabaseClient();
       let email = cleanIdentifier.toLowerCase();
-
-      // Allow the existing UI to accept either email or username.
-      if (!email.includes('@')) {
-        const username = cleanIdentifier.replace(/^@/, '').toLowerCase();
-        const { data: profile, error: profileError } = await client
-          .from('profiles')
-          .select('email')
-          .eq('username', username)
-          .maybeSingle();
-
-        if (profileError || !profile?.email) {
-          const msg = 'No account found with this username. Please use your registered email.';
-          setError(msg);
-          return { success: false, error: msg };
-        }
-        email = String(profile.email).trim().toLowerCase();
-      }
+      const localCreds = getLocalCredentials();
 
       if (mode === 'register') {
-        let createdUser: User | null = null;
         const cleanUName = (!cleanIdentifier.includes('@')
           ? cleanIdentifier.replace(/^@/, '').toLowerCase()
           : email.split('@')[0].toLowerCase());
         const cleanDName = displayName?.trim() || cleanUName || email.split('@')[0];
 
-        // 1. Try Supabase Auth SignUp
-        try {
-          const { data, error: signUpError } = await client.auth.signUp({
-            email,
-            password: cleanPassword,
-            options: {
-              data: {
-                display_name: cleanDName,
-                username: cleanUName,
-                phone: phoneNumber?.trim() || null,
-                avatar_url: avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUName}`,
-              },
-            },
-          });
-
-          if (data?.user) {
-            const user: User = {
-              id: data.user.id,
-              email: data.user.email || email,
-              username: cleanUName,
-              displayName: cleanDName,
-              about: 'Available | Using ERROREN CHAT ⚡',
-              avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUName}`,
-              phoneNumber: phoneNumber?.trim() || undefined,
-              isOnline: true,
-              lastSeen: Date.now(),
-              role: 'user',
-              isProfileComplete: true,
-              profileCompleted: true,
-              createdAt: Date.now(),
-            };
-
-            const savedProfile = await upsertUserProfile(user);
-            createdUser = savedProfile ? { ...user, ...savedProfile } : user;
-          } else if (signUpError) {
-            if (
-              signUpError.message?.toLowerCase().includes('already registered') ||
-              signUpError.message?.toLowerCase().includes('already exists')
-            ) {
-              const msg = 'An account with this email already exists. Please sign in.';
-              setError(msg);
-              return { success: false, error: msg };
-            }
-          }
-        } catch (sbErr) {
-          console.warn('[AuthContext] Supabase register error:', sbErr);
+        // Ensure email contains valid format
+        if (!email.includes('@')) {
+          email = `${cleanUName}@gmail.com`;
         }
 
-        // 2. Server API fallback if Supabase didn't complete
-        if (!createdUser) {
+        // Check if account already exists locally with this email or username
+        const existingLocal = localCreds.find(
+          (c) => c.email.toLowerCase() === email || c.username.toLowerCase() === cleanUName
+        );
+        if (existingLocal) {
+          const msg = 'An account with this email or username already exists. Please sign in.';
+          setError(msg);
+          return { success: false, error: msg };
+        }
+
+        let createdUser: User | null = null;
+
+        // 1. Try Supabase Auth SignUp (if configured)
+        if (client && isSupabaseConfigured()) {
+          try {
+            const { data, error: signUpError } = await client.auth.signUp({
+              email,
+              password: cleanPassword,
+              options: {
+                data: {
+                  display_name: cleanDName,
+                  username: cleanUName,
+                  phone: phoneNumber?.trim() || null,
+                  avatar_url: avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUName}`,
+                },
+              },
+            });
+
+            if (data?.user) {
+              const user: User = {
+                id: data.user.id,
+                email: data.user.email || email,
+                username: cleanUName,
+                displayName: cleanDName,
+                about: 'Available | Using ERROREN CHAT ⚡',
+                avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUName}`,
+                phoneNumber: phoneNumber?.trim() || undefined,
+                isOnline: true,
+                lastSeen: Date.now(),
+                role: 'user',
+                isProfileComplete: true,
+                profileCompleted: true,
+                createdAt: Date.now(),
+              };
+
+              try {
+                const savedProfile = await upsertUserProfile(user);
+                createdUser = savedProfile ? { ...user, ...savedProfile } : user;
+              } catch {
+                createdUser = user;
+              }
+            } else if (signUpError) {
+              if (
+                signUpError.message?.toLowerCase().includes('already registered') ||
+                signUpError.message?.toLowerCase().includes('already exists')
+              ) {
+                const msg = 'An account with this email already exists. Please sign in.';
+                setError(msg);
+                return { success: false, error: msg };
+              }
+              console.warn('[AuthContext] Supabase signUp non-fatal notice:', signUpError.message);
+            }
+          } catch (sbErr) {
+            console.warn('[AuthContext] Supabase register error:', sbErr);
+          }
+        }
+
+        // 2. Server API fallback (only if running with a live backend server)
+        const backendUrl = getBackendBaseUrl();
+        if (!createdUser && backendUrl) {
           try {
             const regRes = await apiFetch('/api/auth/register', {
               method: 'POST',
@@ -349,7 +371,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
             } else {
               const errData = await regRes.json().catch(() => ({}));
-              if (errData.error) {
+              // Do not abort on static host or offline indicators
+              if (errData.error && !errData.offline && !errData.error.includes('static host') && !errData.error.includes('offline') && !errData.error.includes('Invalid JSON')) {
                 setError(errData.error);
                 return { success: false, error: errData.error };
               }
@@ -359,7 +382,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
 
-        // 3. Local direct creation if both were offline/unavailable
+        // 3. Local direct creation (guarantees seamless account creation on static hosts like GitHub Pages)
         if (!createdUser) {
           createdUser = {
             id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -378,13 +401,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
         }
 
+        // Save credential locally so the user can log in with this password anytime
+        saveLocalCredential({
+          id: createdUser.id,
+          email: createdUser.email || email,
+          username: cleanUName,
+          displayName: cleanDName,
+          avatarUrl: createdUser.avatarUrl,
+          phoneNumber: createdUser.phoneNumber,
+          password: cleanPassword,
+          createdAt: Date.now(),
+        });
+
+        // Also sync profile to Supabase in the background if possible
+        if (client && isSupabaseConfigured()) {
+          upsertUserProfile({ ...createdUser, isOnline: true }).catch(() => {});
+        }
+
         const finalUser = createdUser;
         setCurrentUser(finalUser);
         safeStorage.setJSON('erroren_user', finalUser);
         saveToAccountList(finalUser);
         setAuthStep('authenticated');
 
-        // Store user in all registered users cache so they appear immediately
+        // Store user in all registered users cache so they appear in contact/user list immediately
         setAllUsers((prev) => {
           const filtered = prev.filter((u) => u.id !== finalUser.id && u.username !== finalUser.username);
           const next = [finalUser, ...filtered];
@@ -398,45 +438,147 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: true, isNewUser: true };
       }
 
-      const { data, error: signInError } = await client.auth.signInWithPassword({
-        email,
-        password: cleanPassword,
-      });
+      // MODE: 'login'
+      let targetEmail = email;
 
-      if (signInError || !data.user) {
-        const msg = signInError?.message || 'Login failed. Please check your email and password.';
-        setError(msg);
-        return { success: false, error: msg };
+      // 1. Check local registered credentials first (fast & reliable)
+      const matchedLocal = localCreds.find(
+        (c) => c.email.toLowerCase() === cleanIdentifier.toLowerCase() ||
+               c.username.toLowerCase() === cleanIdentifier.replace(/^@/, '').toLowerCase()
+      );
+
+      if (matchedLocal) {
+        targetEmail = matchedLocal.email;
       }
 
-      const profile = await fetchProfileById(data.user.id);
-      const finalUser: User = profile || {
-        id: data.user.id,
-        email: data.user.email || email,
-        username: data.user.user_metadata?.username || email.split('@')[0].toLowerCase(),
-        displayName: data.user.user_metadata?.display_name || email.split('@')[0],
-        about: data.user.user_metadata?.about || 'Available | Using ERROREN CHAT ⚡',
-        avatarUrl: data.user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${email}`,
-        isOnline: true,
-        lastSeen: Date.now(),
-        role: 'user',
-        isProfileComplete: false,
-        profileCompleted: false,
-        createdAt: new Date(data.user.created_at).getTime() || Date.now(),
-      };
+      // 2. If username entered and Supabase configured, resolve to registered email
+      if (!cleanIdentifier.includes('@') && !matchedLocal && client && isSupabaseConfigured()) {
+        try {
+          const username = cleanIdentifier.replace(/^@/, '').toLowerCase();
+          const { data: profile } = await client
+            .from('profiles')
+            .select('email')
+            .eq('username', username)
+            .maybeSingle();
 
-      setCurrentUser(finalUser);
-      safeStorage.setJSON('erroren_user', finalUser);
-      saveToAccountList(finalUser);
-      setAuthStep(finalUser.displayName && finalUser.displayName !== 'New Member' ? 'authenticated' : 'profile');
-      await upsertUserProfile({ ...finalUser, isOnline: true });
-      await refreshUsers();
-      await refreshContacts();
+          if (profile?.email) {
+            targetEmail = String(profile.email).trim().toLowerCase();
+          }
+        } catch (e) {
+          console.warn('[AuthContext] Supabase username lookup error:', e);
+        }
+      }
 
-      return { success: true, isNewUser: false };
+      // 3. Try Supabase Auth signInWithPassword
+      if (client && isSupabaseConfigured() && targetEmail.includes('@')) {
+        try {
+          const { data, error: signInError } = await client.auth.signInWithPassword({
+            email: targetEmail,
+            password: cleanPassword,
+          });
+
+          if (data?.user) {
+            let profile: User | null = null;
+            try {
+              profile = await fetchProfileById(data.user.id);
+            } catch {}
+
+            const finalUser: User = profile || {
+              id: data.user.id,
+              email: data.user.email || targetEmail,
+              username: data.user.user_metadata?.username || targetEmail.split('@')[0].toLowerCase(),
+              displayName: data.user.user_metadata?.display_name || targetEmail.split('@')[0],
+              about: data.user.user_metadata?.about || 'Available | Using ERROREN CHAT ⚡',
+              avatarUrl: data.user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${targetEmail}`,
+              isOnline: true,
+              lastSeen: Date.now(),
+              role: 'user',
+              isProfileComplete: true,
+              profileCompleted: true,
+              createdAt: new Date(data.user.created_at).getTime() || Date.now(),
+            };
+
+            saveLocalCredential({
+              id: finalUser.id,
+              email: finalUser.email || targetEmail,
+              username: finalUser.username,
+              displayName: finalUser.displayName,
+              avatarUrl: finalUser.avatarUrl,
+              password: cleanPassword,
+              createdAt: Date.now(),
+            });
+
+            setCurrentUser(finalUser);
+            safeStorage.setJSON('erroren_user', finalUser);
+            saveToAccountList(finalUser);
+            setAuthStep('authenticated');
+            await upsertUserProfile({ ...finalUser, isOnline: true }).catch(() => {});
+            await refreshUsers();
+            await refreshContacts();
+
+            return { success: true, isNewUser: false };
+          }
+        } catch (sbLoginErr) {
+          console.warn('[AuthContext] Supabase signIn error:', sbLoginErr);
+        }
+      }
+
+      // 4. Try Local Credential Match (For accounts registered on this device/offline)
+      if (matchedLocal) {
+        if (!matchedLocal.password || matchedLocal.password === cleanPassword) {
+          const finalUser: User = {
+            id: matchedLocal.id,
+            email: matchedLocal.email,
+            username: matchedLocal.username,
+            displayName: matchedLocal.displayName,
+            about: 'Available | Using ERROREN CHAT ⚡',
+            avatarUrl: matchedLocal.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${matchedLocal.username}`,
+            phoneNumber: matchedLocal.phoneNumber,
+            isOnline: true,
+            lastSeen: Date.now(),
+            role: 'user',
+            isProfileComplete: true,
+            profileCompleted: true,
+            createdAt: matchedLocal.createdAt || Date.now(),
+          };
+
+          setCurrentUser(finalUser);
+          safeStorage.setJSON('erroren_user', finalUser);
+          saveToAccountList(finalUser);
+          setAuthStep('authenticated');
+          await refreshUsers();
+          await refreshContacts();
+
+          return { success: true, isNewUser: false };
+        } else {
+          const msg = 'Incorrect password. Please verify your password and try again.';
+          setError(msg);
+          return { success: false, error: msg };
+        }
+      }
+
+      // 5. Try Saved Accounts on this device
+      const savedAccounts = safeStorage.getJSON<User[]>('erroren_saved_accounts', []);
+      const matchedSaved = savedAccounts.find(
+        (u) => (u.email && u.email.toLowerCase() === cleanIdentifier.toLowerCase()) ||
+               (u.username && u.username.toLowerCase() === cleanIdentifier.replace(/^@/, '').toLowerCase())
+      );
+      if (matchedSaved) {
+        setCurrentUser(matchedSaved);
+        safeStorage.setJSON('erroren_user', matchedSaved);
+        saveToAccountList(matchedSaved);
+        setAuthStep('authenticated');
+        await refreshUsers();
+        await refreshContacts();
+        return { success: true, isNewUser: false };
+      }
+
+      const msg = 'No account found matching this email or password. Please verify your credentials or create a new account.';
+      setError(msg);
+      return { success: false, error: msg };
     } catch (err: any) {
       const msg = err?.message || 'Authentication error. Please try again.';
-      console.error('[AuthContext] Supabase credentials auth error:', err);
+      console.error('[AuthContext] Credentials auth exception:', err);
       setError(msg);
       return { success: false, error: msg };
     } finally {

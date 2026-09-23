@@ -71,14 +71,12 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
     res.json = async () => {
       try {
         const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('text/html') || !res.ok) {
-          if (contentType.includes('text/html')) {
-            return { error: 'Endpoint route not found on static host', success: false, offline: true };
-          }
+        if (contentType.includes('text/html') || (!res.ok && !contentType.includes('application/json'))) {
+          return { error: 'Backend API unavailable on static host', success: false, offline: true };
         }
         return await originalJson();
       } catch {
-        return { error: 'Invalid JSON response from server', success: false, offline: true };
+        return { error: 'Backend service offline or unreachable', success: false, offline: true };
       }
     };
     return res;
