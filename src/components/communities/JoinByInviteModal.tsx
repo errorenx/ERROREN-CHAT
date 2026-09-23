@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, Community } from '../../types';
 import { Avatar } from '../common/Avatar';
 import { Link, X, Loader2, Check, Users, ArrowRight, ShieldCheck } from 'lucide-react';
-import { apiFetch } from '../../utils/api';
+import { getCommunityByInviteCode, joinCommunityInSupabase } from '../../services/supabaseChat';
 
 interface JoinByInviteModalProps {
   isOpen: boolean;
@@ -48,12 +48,11 @@ export const JoinByInviteModal: React.FC<JoinByInviteModalProps> = ({
     setPreviewCommunity(null);
 
     try {
-      const response = await apiFetch(`/api/invites/${encodeURIComponent(code)}`);
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Community not found or invite is expired.');
+      const comm = await getCommunityByInviteCode(code);
+      if (!comm) {
+        throw new Error('Community not found or invite code is invalid.');
       }
-      setPreviewCommunity(data);
+      setPreviewCommunity(comm);
     } catch (err: any) {
       console.error('Invite lookup failed:', err);
       setError(err.message || 'Could not find community with that invite code.');
@@ -69,18 +68,14 @@ export const JoinByInviteModal: React.FC<JoinByInviteModalProps> = ({
     setError(null);
 
     try {
-      const response = await apiFetch(`/api/communities/${previewCommunity.id}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id }),
-      });
+      await joinCommunityInSupabase(previewCommunity.id, currentUser.id);
+      const updatedCommunity: Community = {
+        ...previewCommunity,
+        isJoined: true,
+        memberCount: (previewCommunity.memberCount || 1) + 1,
+      };
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to join community.');
-      }
-
-      onCommunityJoined(data.community);
+      onCommunityJoined(updatedCommunity);
       onClose();
     } catch (err: any) {
       console.error('Error joining community:', err);

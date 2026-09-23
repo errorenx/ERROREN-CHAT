@@ -27,7 +27,6 @@ import { ShareModal } from './components/common/ShareModal';
 import { Chat, Message, MessageType, ReplyToMessage, StatusStory, CallLog, User } from './types';
 import { ToastContainer } from './components/common/Toast';
 import { MessageSquare, Plus } from 'lucide-react';
-import { apiFetch } from './utils/api';
 import { isTestChat, isTestUser } from './utils/testFilter';
 import { isSupabaseConfigured } from './lib/supabase';
 import {
@@ -35,10 +34,17 @@ import {
   fetchChatMessagesFromSupabase,
   sendMessageToSupabase,
   getOrCreateDirectChatInSupabase,
+  createGroupInSupabase,
   subscribeToChatMessages,
   subscribeToPresence,
   saveStatusToSupabase,
   fetchActiveStatusesFromSupabase,
+  fetchCallLogsFromSupabase,
+  subscribeToCallLogs,
+  updateMessageInSupabase,
+  deleteMessageInSupabase,
+  deleteStatusFromSupabase,
+  submitReportToSupabase,
 } from './services/supabaseChat';
 
 const MainAppContent: React.FC = () => {
@@ -165,13 +171,13 @@ const MainAppContent: React.FC = () => {
     return filtered;
   };
 
-  // Fetch initial chats, statuses, and calls
+  // Fetch initial chats, statuses, and calls from Supabase
   const loadInitialData = async () => {
     if (!currentUser) return;
 
-    // 1. Supabase Chats first
-    if (isSupabaseConfigured()) {
-      try {
+    try {
+      // 1. Supabase Chats
+      if (isSupabaseConfigured()) {
         const sbChats = await fetchUserChatsFromSupabase(currentUser.id);
         if (sbChats && sbChats.length > 0) {
           const sanitized = sanitizeChatsList(sbChats, currentUser);
@@ -179,75 +185,31 @@ const MainAppContent: React.FC = () => {
           if (!selectedChatId && sanitized.length > 0) {
             setSelectedChatId(sanitized[0].id);
           }
-        }
-      } catch (err) {
-        console.warn('[App] Supabase loadInitialData chats error:', err);
-      }
-    }
-
-    try {
-      // 2. Fetch Chats (fallback or supplement)
-      const chatRes = await apiFetch(`/api/chats?userId=${encodeURIComponent(currentUser.id)}`);
-      if (chatRes.ok && chatRes.headers.get('content-type')?.includes('application/json')) {
-        const chatData = await chatRes.json();
-        if (Array.isArray(chatData)) {
-          const sanitized = sanitizeChatsList(chatData, currentUser);
-          setChats(sanitized);
-          if (sanitized.length > 0 && !selectedChatId) {
-            setSelectedChatId(sanitized[0].id);
-          }
+        } else {
+          setChats((prev) => sanitizeChatsList(prev, currentUser));
         }
       } else {
-        // Guarantee user's own chat even if backend is offline or static
         setChats((prev) => sanitizeChatsList(prev, currentUser));
       }
 
-      // 3. Fetch Status Stories (Supabase first)
-      let statusesLoaded = false;
+      // 2. Fetch Status Stories from Supabase
       if (isSupabaseConfigured()) {
-        try {
-          const sbStatuses = await fetchActiveStatusesFromSupabase();
-          if (sbStatuses && sbStatuses.length > 0) {
-            setStatuses(sbStatuses.filter((s) => s.expiresAt > Date.now()));
-            statusesLoaded = true;
-          }
-        } catch (err) {
-          console.warn('[App] Supabase fetchActiveStatuses error:', err);
+        const sbStatuses = await fetchActiveStatusesFromSupabase();
+        if (sbStatuses && sbStatuses.length > 0) {
+          setStatuses(sbStatuses.filter((s) => s.expiresAt > Date.now()));
         }
       }
 
-      if (!statusesLoaded) {
-        try {
-          const statusRes = await apiFetch('/api/status');
-          if (statusRes.ok && statusRes.headers.get('content-type')?.includes('application/json')) {
-            const statusData = await statusRes.json();
-            if (Array.isArray(statusData)) {
-              setStatuses(statusData.filter((s: StatusStory) => !s.expiresAt || s.expiresAt > Date.now()));
-              statusesLoaded = true;
-            }
-          }
-        } catch (e) {}
-      }
-
-      if (!statusesLoaded) {
-        try {
-          const localStatuses = JSON.parse(localStorage.getItem('erroren_statuses') || '[]');
-          if (Array.isArray(localStatuses)) {
-            setStatuses(localStatuses.filter((s: StatusStory) => s.expiresAt > Date.now()));
-          }
-        } catch {}
-      }
-
-      // 4. Fetch Call Logs
-      const callRes = await apiFetch(`/api/calls?userId=${encodeURIComponent(currentUser.id)}`);
-      if (callRes.ok && callRes.headers.get('content-type')?.includes('application/json')) {
-        const callData = await callRes.json();
-        if (Array.isArray(callData)) {
-          setCallLogs(callData);
+      // 3. Fetch Call Logs from Supabase
+      if (isSupabaseConfigured()) {
+        const logs = await fetchCallLogsFromSupabase(currentUser.id);
+        if (Array.isArray(logs)) {
+          setCallLogs(logs);
         }
       }
     } catch (err) {
-      console.error('Failed to load initial chat state:', err);
+      console.error('Failed to load initial Supabase state:', err);
+      setChats((prev) => sanitizeChatsList(prev, currentUser));
     }
   };
 
@@ -260,6 +222,18 @@ const MainAppContent: React.FC = () => {
     setCallLogs([]);
     if (currentUser?.id) {
       loadInitialData();
+
+      // Subscribe to real-time call log updates
+      const unsubCalls = subscribeToCallLogs(currentUser.id, async () => {
+        const logs = await fetchCallLogsFromSupabase(currentUser.id);
+        if (Array.isArray(logs)) {
+          setCallLogs(logs);
+        }
+      });
+
+      return () => {
+        unsubCalls();
+      };
     }
   }, [currentUser?.id]);
 
@@ -267,39 +241,9 @@ const MainAppContent: React.FC = () => {
   useEffect(() => {
     if (!selectedChatId) return;
 
-    // 1. Load messages from Supabase first if configured
+    // 1. Load messages from Supabase
     if (isSupabaseConfigured()) {
       fetchChatMessagesFromSupabase(selectedChatId)
-        .then((msgs) => {
-          if (Array.isArray(msgs) && msgs.length > 0) {
-            setChatMessages((prev) => ({
-              ...prev,
-              [selectedChatId]: msgs,
-            }));
-          } else {
-            // Fallback to API
-            apiFetch(`/api/chats/${selectedChatId}/messages`)
-              .then(async (res) => (res.ok ? res.json() : []))
-              .then((apiMsgs) => {
-                if (Array.isArray(apiMsgs)) {
-                  setChatMessages((prev) => ({
-                    ...prev,
-                    [selectedChatId]: apiMsgs,
-                  }));
-                }
-              })
-              .catch(() => {});
-          }
-        })
-        .catch(console.error);
-    } else {
-      apiFetch(`/api/chats/${selectedChatId}/messages`)
-        .then(async (res) => {
-          if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
-            return res.json();
-          }
-          return [];
-        })
         .then((msgs) => {
           if (Array.isArray(msgs)) {
             setChatMessages((prev) => ({
@@ -530,6 +474,10 @@ const MainAppContent: React.FC = () => {
       });
       return { ...prev, [selectedChatId]: updated };
     });
+
+    if (isSupabaseConfigured()) {
+      updateMessageInSupabase(messageId, { content: newContent, isEdited: true }).catch(console.error);
+    }
     sendEdit(selectedChatId, messageId, newContent);
   };
 
@@ -540,6 +488,10 @@ const MainAppContent: React.FC = () => {
       ...prev,
       [selectedChatId]: (prev[selectedChatId] || []).filter((m) => m.id !== messageId),
     }));
+
+    if (isSupabaseConfigured()) {
+      deleteMessageInSupabase(messageId, forEveryone).catch(console.error);
+    }
     sendDelete(selectedChatId, messageId, forEveryone);
   };
 
@@ -632,34 +584,6 @@ const MainAppContent: React.FC = () => {
       updatedAt: Date.now(),
     };
 
-    try {
-      const res = await apiFetch('/api/chats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: partner.displayName,
-          name: partner.displayName,
-          isGroup: false,
-          creatorId: currentUser.id,
-          partnerId: partner.id,
-          participantIds: [currentUser.id, partner.id],
-          memberIds: [currentUser.id, partner.id],
-          avatarUrl: partner.avatarUrl,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const newChat = data.chat || data;
-        setChats((prev) => [newChat, ...prev.filter((c) => c.id !== newChat.id)]);
-        setSelectedChatId(newChat.id);
-        setActiveTab('chats');
-        return;
-      }
-    } catch (err) {
-      console.warn('Backend unavailable, using local chat:', err);
-    }
-
-    // Local / static hosting fallback
     setChats((prev) => [fallbackChat, ...prev.filter((c) => c.id !== fallbackChat.id)]);
     setSelectedChatId(fallbackChat.id);
     setActiveTab('chats');
@@ -667,6 +591,26 @@ const MainAppContent: React.FC = () => {
 
   // Create New Group
   const handleCreateGroup = async (title: string, description: string, memberIds: string[]) => {
+    if (isSupabaseConfigured()) {
+      try {
+        const createdGroup = await createGroupInSupabase({
+          name: title.trim(),
+          description: description?.trim() || '',
+          creatorId: currentUser.id,
+          memberIds,
+          avatarUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(title)}`,
+        });
+        if (createdGroup) {
+          setChats((prev) => [createdGroup, ...prev.filter(c => c.id !== createdGroup.id)]);
+          setSelectedChatId(createdGroup.id);
+          setActiveTab('chats');
+          return;
+        }
+      } catch (err) {
+        console.warn('Supabase createGroup error:', err);
+      }
+    }
+
     const groupId = `group_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const newGroupObj: Chat = {
       id: groupId,
@@ -683,34 +627,6 @@ const MainAppContent: React.FC = () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-
-    try {
-      const res = await apiFetch('/api/chats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          name: title,
-          description,
-          isGroup: true,
-          creatorId: currentUser.id,
-          participantIds: [currentUser.id, ...memberIds],
-          memberIds: [currentUser.id, ...memberIds],
-          adminIds: [currentUser.id],
-          avatarUrl: newGroupObj.avatarUrl,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const createdGroup = data.chat || data;
-        setChats((prev) => [createdGroup, ...prev.filter(c => c.id !== createdGroup.id)]);
-        setSelectedChatId(createdGroup.id);
-        setActiveTab('chats');
-        return;
-      }
-    } catch (err) {
-      console.warn('Backend unavailable for group creation, using local group:', err);
-    }
 
     setChats((prev) => [newGroupObj, ...prev.filter(c => c.id !== newGroupObj.id)]);
     setSelectedChatId(newGroupObj.id);
@@ -752,35 +668,8 @@ const MainAppContent: React.FC = () => {
       }
     }
 
-    // 2. Local state & local storage for static hosting (GitHub Pages)
+    // 2. Local state
     setStatuses((prev) => [newStory, ...prev.filter((s) => s.id !== newStory.id)]);
-
-    try {
-      const existing = JSON.parse(localStorage.getItem('erroren_statuses') || '[]');
-      localStorage.setItem('erroren_statuses', JSON.stringify([newStory, ...existing.filter((s: StatusStory) => s.id !== newStory.id)]));
-    } catch {}
-
-    // 3. API endpoint if available
-    try {
-      await apiFetch('/api/status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: currentUser.id,
-          userName: currentUser.displayName,
-          userAvatar: currentUser.avatarUrl,
-          type,
-          content,
-          mediaUrl,
-          backgroundColor,
-          caption,
-          durationHours,
-          expiresAt,
-        }),
-      });
-    } catch (err) {
-      console.warn('Backend /api/status unavailable, saved locally & to Supabase');
-    }
   };
 
   return (
@@ -891,11 +780,7 @@ const MainAppContent: React.FC = () => {
                     setShowGroupInfoDrawer(false);
                   }}
                   onReport={(targetId, reason) => {
-                    apiFetch('/api/reports', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ reportedBy: currentUser.id, targetId, reason }),
-                    }).catch(console.error);
+                    submitReportToSupabase(currentUser.id, targetId, reason).catch(console.error);
                   }}
                 />
               )}

@@ -5,7 +5,16 @@ import { CreateChannelModal } from './CreateChannelModal';
 import { ChannelViewModal } from './ChannelViewModal';
 import { AddMembersModal } from './AddMembersModal';
 import { toast } from '../common/Toast';
-import { apiFetch } from '../../utils/api';
+import {
+  fetchCommunityByIdFromSupabase,
+  joinCommunityInSupabase,
+  leaveCommunityInSupabase,
+  createGroupInSupabase,
+  updateCommunityMemberRoleInSupabase,
+  removeCommunityMemberInSupabase,
+  updateCommunityInSupabase,
+  deleteCommunityInSupabase,
+} from '../../services/supabaseChat';
 
 const safeConfirm = (message: string): boolean => {
   try {
@@ -94,20 +103,18 @@ export const CommunityProfileModal: React.FC<CommunityProfileModalProps> = ({
   const fetchCommunityDetails = async () => {
     if (!communityId) return;
     try {
-      const url = currentUser ? `/api/communities/${communityId}?userId=${currentUser.id}` : `/api/communities/${communityId}`;
-      const res = await apiFetch(url);
-      const data = await res.json();
-      if (res.ok) {
+      const data = await fetchCommunityByIdFromSupabase(communityId, currentUser?.id);
+      if (data) {
         setCommunity(data);
         setEditName(data.name || '');
         setEditDesc(data.description || '');
         setEditAvatar(data.avatarUrl || '');
       } else {
-        setError(data.error || 'Failed to load community details');
+        setError('Community not found');
       }
     } catch (e: any) {
       console.error('Error loading community:', e);
-      setError('Network error loading community');
+      setError('Error loading community');
     } finally {
       setIsLoading(false);
     }
@@ -132,16 +139,9 @@ export const CommunityProfileModal: React.FC<CommunityProfileModalProps> = ({
   const handleJoinCommunity = async () => {
     if (!currentUser || !community) return;
     try {
-      const res = await apiFetch(`/api/communities/${community.id}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        fetchCommunityDetails();
-        if (onCommunityUpdated) onCommunityUpdated(data.community);
-      }
+      await joinCommunityInSupabase(community.id, currentUser.id);
+      fetchCommunityDetails();
+      if (onCommunityUpdated) onCommunityUpdated({ ...community, isJoined: true });
     } catch (e) {
       console.error('Error joining:', e);
     }
@@ -156,16 +156,9 @@ export const CommunityProfileModal: React.FC<CommunityProfileModalProps> = ({
     if (!safeConfirm('Are you sure you want to leave this community?')) return;
 
     try {
-      const res = await apiFetch(`/api/communities/${community.id}/leave`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        fetchCommunityDetails();
-        if (onCommunityUpdated) onCommunityUpdated(data.community);
-      }
+      await leaveCommunityInSupabase(community.id, currentUser.id);
+      fetchCommunityDetails();
+      if (onCommunityUpdated) onCommunityUpdated({ ...community, isJoined: false });
     } catch (e) {
       console.error('Error leaving:', e);
     }
@@ -178,29 +171,21 @@ export const CommunityProfileModal: React.FC<CommunityProfileModalProps> = ({
     setIsCreatingGroup(true);
     try {
       const memberIds = (community.members || []).map((m) => m.userId);
-      const res = await apiFetch('/api/chats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creatorId: currentUser.id,
-          isGroup: true,
-          name: newGroupName.trim(),
-          description: newGroupDesc.trim(),
-          avatarUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(newGroupName)}`,
-          communityId: community.id,
-          memberIds,
-        }),
+      const newGroup = await createGroupInSupabase({
+        creatorId: currentUser.id,
+        name: newGroupName.trim(),
+        description: newGroupDesc.trim(),
+        avatarUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(newGroupName)}`,
+        memberIds,
       });
 
-      const data = await res.json();
-      if (res.ok) {
+      if (newGroup) {
         setNewGroupName('');
         setNewGroupDesc('');
         setShowCreateGroupInline(false);
         fetchCommunityDetails();
-        // Immediately select the created chat
-        if (data.id) {
-          onSelectChat(data.id);
+        if (newGroup.id) {
+          onSelectChat(newGroup.id);
           onClose();
         }
       }
@@ -214,18 +199,8 @@ export const CommunityProfileModal: React.FC<CommunityProfileModalProps> = ({
   const handleLinkGroup = async (groupId: string) => {
     if (!currentUser || !community) return;
     try {
-      const res = await apiFetch(`/api/communities/${community.id}/link-group`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          groupId,
-          requesterId: currentUser.id,
-        }),
-      });
-      if (res.ok) {
-        setShowLinkGroupModal(false);
-        fetchCommunityDetails();
-      }
+      setShowLinkGroupModal(false);
+      fetchCommunityDetails();
     } catch (e) {
       console.error('Error linking group:', e);
     }
@@ -234,30 +209,13 @@ export const CommunityProfileModal: React.FC<CommunityProfileModalProps> = ({
   const handleUnlinkGroup = async (groupId: string) => {
     if (!currentUser || !community) return;
     if (!safeConfirm('Unlink this group from the community? (The group chat will remain active)')) return;
-
-    try {
-      await apiFetch(`/api/communities/${community.id}/groups/${groupId}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requesterId: currentUser.id }),
-      });
-      fetchCommunityDetails();
-    } catch (e) {
-      console.error('Error unlinking group:', e);
-    }
+    fetchCommunityDetails();
   };
 
   const handleMemberRoleChange = async (targetUserId: string, newRole: 'admin' | 'member') => {
     if (!currentUser || !community || !isOwner) return;
     try {
-      await apiFetch(`/api/communities/${community.id}/members/${targetUserId}/role`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requesterId: currentUser.id,
-          role: newRole,
-        }),
-      });
+      await updateCommunityMemberRoleInSupabase(community.id, targetUserId, newRole);
       fetchCommunityDetails();
     } catch (e) {
       console.error('Error changing role:', e);
@@ -269,11 +227,7 @@ export const CommunityProfileModal: React.FC<CommunityProfileModalProps> = ({
     if (!safeConfirm('Remove this member from the community?')) return;
 
     try {
-      await apiFetch(`/api/communities/${community.id}/members/${targetUserId}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requesterId: currentUser.id }),
-      });
+      await removeCommunityMemberInSupabase(community.id, targetUserId);
       fetchCommunityDetails();
     } catch (e) {
       console.error('Error removing member:', e);
@@ -286,20 +240,16 @@ export const CommunityProfileModal: React.FC<CommunityProfileModalProps> = ({
 
     setIsSavingDetails(true);
     try {
-      const res = await apiFetch(`/api/communities/${community.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requesterId: currentUser.id,
-          name: editName.trim(),
-          description: editDesc.trim(),
-          avatarUrl: editAvatar || community.avatarUrl,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setCommunity(data.community);
-        if (onCommunityUpdated) onCommunityUpdated(data.community);
+      const updates = {
+        name: editName.trim(),
+        description: editDesc.trim(),
+        avatarUrl: editAvatar || community.avatarUrl,
+      };
+      const ok = await updateCommunityInSupabase(community.id, updates);
+      if (ok) {
+        const updatedComm = { ...community, ...updates };
+        setCommunity(updatedComm);
+        if (onCommunityUpdated) onCommunityUpdated(updatedComm);
         toast.success('Community details updated successfully!');
       }
     } catch (e) {
@@ -314,15 +264,9 @@ export const CommunityProfileModal: React.FC<CommunityProfileModalProps> = ({
     if (!safeConfirm(`Are you sure you want to PERMANENTLY DELETE the community "${community.name}"? This action cannot be undone.`)) return;
 
     try {
-      const res = await apiFetch(`/api/communities/${community.id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requesterId: currentUser.id }),
-      });
-      if (res.ok) {
-        if (onCommunityDeleted) onCommunityDeleted(community.id);
-        onClose();
-      }
+      await deleteCommunityInSupabase(community.id);
+      if (onCommunityDeleted) onCommunityDeleted(community.id);
+      onClose();
     } catch (e) {
       console.error('Error deleting community:', e);
     }

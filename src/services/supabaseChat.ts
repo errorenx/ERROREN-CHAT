@@ -6,9 +6,19 @@
 
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 export { isSupabaseConfigured };
-import { User, Contact, Chat, Message, Community, StatusStory, Channel, ChannelPost } from '../types';
+import { User, Contact, Chat, Message, Community, StatusStory, Channel, ChannelPost, CallLog } from '../types';
 import { getPhoneLookupVariants, normalizePhoneNumber, isPhoneMatch } from '../utils/phoneUtils';
 import { isTestUser } from '../utils/testFilter';
+
+export function logSupabaseError(operation: string, table: string, error: any) {
+  if (!error) return;
+  console.error(`[Supabase Error] Operation: "${operation}" | Table: "${table}"`, {
+    message: error.message || String(error),
+    code: error.code || 'UNKNOWN',
+    details: error.details || null,
+    hint: error.hint || null,
+  });
+}
 
 export interface PhoneLookupResult {
   registered: boolean;
@@ -601,6 +611,100 @@ export async function fetchUserChatsFromSupabase(userId: string): Promise<Chat[]
   }
 }
 
+/**
+ * Creates a new group conversation in Supabase with chat_members.
+ */
+export async function createGroupInSupabase(group: {
+  name: string;
+  description?: string;
+  avatarUrl?: string;
+  creatorId: string;
+  memberIds: string[];
+}): Promise<Chat | null> {
+  const client = getSupabaseClient();
+  const id = `group_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const avatarUrl = group.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(group.name)}`;
+  const allMembers = Array.from(new Set([group.creatorId, ...group.memberIds]));
+
+  const localGroup: Chat = {
+    id,
+    title: group.name,
+    name: group.name,
+    description: group.description,
+    avatarUrl,
+    isGroup: true,
+    creatorId: group.creatorId,
+    participantIds: allMembers,
+    memberIds: allMembers,
+    adminIds: [group.creatorId],
+    unreadCount: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+
+  if (!client) return localGroup;
+
+  try {
+    const { data: newChat, error: cErr } = await client
+      .from('chats')
+      .insert({
+        id,
+        type: 'group',
+        name: group.name,
+        description: group.description || null,
+        avatar_url: avatarUrl,
+        created_by: group.creatorId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (cErr) {
+      logSupabaseError('createGroupInSupabase', 'chats', cErr);
+      return localGroup;
+    }
+
+    // Insert members
+    const memberRows = allMembers.map((uid) => ({
+      chat_id: newChat.id,
+      user_id: uid,
+      role: uid === group.creatorId ? 'owner' : 'member',
+    }));
+
+    const { error: mErr } = await client.from('chat_members').insert(memberRows);
+    if (mErr) {
+      logSupabaseError('createGroupInSupabase (members)', 'chat_members', mErr);
+    }
+
+    return {
+      ...localGroup,
+      id: newChat.id,
+      createdAt: new Date(newChat.created_at).getTime(),
+      updatedAt: new Date(newChat.updated_at).getTime(),
+    };
+  } catch (err: any) {
+    console.error('[Supabase] createGroupInSupabase exception:', err);
+    return localGroup;
+  }
+}
+
+/**
+ * Deletes or leaves a chat in Supabase.
+ */
+export async function deleteChatFromSupabase(chatId: string, userId: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client || !chatId) return true;
+  try {
+    // Delete membership first
+    await client.from('chat_members').delete().eq('chat_id', chatId).eq('user_id', userId);
+    return true;
+  } catch (err) {
+    console.warn('[Supabase] deleteChatFromSupabase error:', err);
+    return true;
+  }
+}
+
 // ==============================================================================
 // 4. MESSAGES & PERSISTENCE
 // ==============================================================================
@@ -709,6 +813,51 @@ export async function markChatMessagesAsReadInSupabase(chatId: string, currentUs
     console.warn('[Supabase] markChatMessagesAsRead error:', e);
   }
 }
+
+/**
+ * Updates a message in Supabase (reactions, edits, status).
+ */
+export async function updateMessageInSupabase(messageId: string, updates: Partial<Message>): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client || !messageId) return false;
+  try {
+    const payload: any = { updated_at: new Date().toISOString() };
+    if (updates.content !== undefined) payload.content = updates.content;
+    if (updates.status !== undefined) payload.status = updates.status;
+    if (updates.reactions !== undefined) payload.reactions = updates.reactions;
+
+    const { error } = await client.from('messages').update(payload).eq('id', messageId);
+    if (error) {
+      logSupabaseError('updateMessageInSupabase', 'messages', error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[Supabase] updateMessage exception:', e);
+    return false;
+  }
+}
+
+/**
+ * Deletes a message in Supabase.
+ */
+export async function deleteMessageInSupabase(messageId: string, _forEveryone: boolean = true): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client || !messageId) return false;
+  try {
+    const { error } = await client.from('messages').delete().eq('id', messageId);
+    if (error) {
+      logSupabaseError('deleteMessageInSupabase', 'messages', error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[Supabase] deleteMessage exception:', e);
+    return false;
+  }
+}
+
+export { deleteStatusStoryFromSupabase as deleteStatusFromSupabase };
 
 // ==============================================================================
 // 5. REAL-TIME SUBSCRIPTIONS
@@ -986,6 +1135,171 @@ export async function leaveCommunityInSupabase(communityId: string, userId: stri
   }
 }
 
+export async function addCommunityMemberInSupabase(
+  communityId: string,
+  userId: string,
+  role: 'member' | 'admin' | 'moderator' = 'member'
+): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return true;
+  try {
+    const { error } = await client.from('community_members').upsert({
+      community_id: communityId,
+      user_id: userId,
+      role,
+    }, { onConflict: 'community_id,user_id' });
+    if (error) logSupabaseError('addCommunityMemberInSupabase', 'community_members', error);
+    return !error;
+  } catch (e) {
+    console.error('[Supabase] addCommunityMember exception:', e);
+    return false;
+  }
+}
+
+export async function removeCommunityMemberInSupabase(communityId: string, userId: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return true;
+  try {
+    const { error } = await client.from('community_members').delete().eq('community_id', communityId).eq('user_id', userId);
+    if (error) logSupabaseError('removeCommunityMemberInSupabase', 'community_members', error);
+    return !error;
+  } catch (e) {
+    console.error('[Supabase] removeCommunityMember exception:', e);
+    return false;
+  }
+}
+
+export async function updateCommunityMemberRoleInSupabase(communityId: string, userId: string, role: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return true;
+  try {
+    const { error } = await client.from('community_members').update({ role }).eq('community_id', communityId).eq('user_id', userId);
+    if (error) logSupabaseError('updateCommunityMemberRoleInSupabase', 'community_members', error);
+    return !error;
+  } catch (e) {
+    console.error('[Supabase] updateCommunityMemberRole exception:', e);
+    return false;
+  }
+}
+
+export async function updateCommunityInSupabase(communityId: string, updates: Partial<Community>): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return true;
+  try {
+    const payload: any = { updated_at: new Date().toISOString() };
+    if (updates.name) payload.name = updates.name;
+    if (updates.description !== undefined) payload.description = updates.description;
+    if (updates.avatarUrl) payload.avatar_url = updates.avatarUrl;
+    if (updates.isPublic !== undefined) payload.is_public = updates.isPublic;
+
+    const { error } = await client.from('communities').update(payload).eq('id', communityId);
+    if (error) logSupabaseError('updateCommunityInSupabase', 'communities', error);
+    return !error;
+  } catch (e) {
+    console.error('[Supabase] updateCommunity exception:', e);
+    return false;
+  }
+}
+
+export async function deleteCommunityInSupabase(communityId: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return true;
+  try {
+    const { error } = await client.from('communities').delete().eq('id', communityId);
+    if (error) logSupabaseError('deleteCommunityInSupabase', 'communities', error);
+    return !error;
+  } catch (e) {
+    console.error('[Supabase] deleteCommunity exception:', e);
+    return false;
+  }
+}
+
+export async function getCommunityByInviteCode(code: string): Promise<Community | null> {
+  const client = getSupabaseClient();
+  if (!client || !code) return null;
+  try {
+    const cleanCode = code.trim().toUpperCase();
+    const { data, error } = await client
+      .from('communities')
+      .select('*')
+      .or(`invite_code.ilike.${cleanCode},id.ilike.${cleanCode}`)
+      .limit(1);
+
+    if (error || !data || data.length === 0) return null;
+    const c = data[0];
+    return {
+      id: c.id,
+      name: c.name,
+      description: c.description || '',
+      avatarUrl: c.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${c.name}`,
+      creatorId: c.creator_id,
+      members: [],
+      adminIds: [c.creator_id],
+      groupIds: [],
+      channelIds: [],
+      inviteCode: c.invite_code || c.id.substring(0, 8),
+      isPublic: Boolean(c.is_public ?? true),
+      createdAt: c.created_at ? new Date(c.created_at).getTime() : Date.now(),
+      updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
+      memberCount: c.member_count || 1,
+      isJoined: false,
+    };
+  } catch (e) {
+    console.error('[Supabase] getCommunityByInviteCode exception:', e);
+    return null;
+  }
+}
+
+export async function fetchCommunityByIdFromSupabase(communityId: string, currentUserId?: string): Promise<Community | null> {
+  const client = getSupabaseClient();
+  if (!client || !communityId) return null;
+  try {
+    const { data: c, error } = await client.from('communities').select('*').eq('id', communityId).single();
+    if (error || !c) return null;
+
+    // Fetch members
+    const { data: memberRows } = await client
+      .from('community_members')
+      .select('user_id, role, created_at, profile:user_id(*)')
+      .eq('community_id', communityId);
+
+    const members = (memberRows || []).map((m: any) => ({
+      userId: m.user_id,
+      role: m.role || 'member',
+      joinedAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+      user: m.profile ? mapProfileToUser(m.profile) : undefined,
+    }));
+
+    const adminIds = members.filter((m: any) => m.role === 'admin' || m.role === 'owner').map((m: any) => m.userId);
+    const isJoined = currentUserId ? members.some((m: any) => m.userId === currentUserId) : false;
+
+    // Fetch channels
+    const channels = await fetchChannelsFromSupabase(communityId);
+
+    return {
+      id: c.id,
+      name: c.name,
+      description: c.description || '',
+      avatarUrl: c.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${c.name}`,
+      creatorId: c.creator_id,
+      members,
+      adminIds: adminIds.length > 0 ? adminIds : [c.creator_id],
+      groupIds: [],
+      channelIds: channels.map((ch) => ch.id),
+      channels,
+      inviteCode: c.invite_code || c.id.substring(0, 8),
+      isPublic: Boolean(c.is_public ?? true),
+      createdAt: c.created_at ? new Date(c.created_at).getTime() : Date.now(),
+      updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
+      memberCount: members.length > 0 ? members.length : (c.member_count || 1),
+      isJoined,
+    };
+  } catch (e) {
+    console.error('[Supabase] fetchCommunityById exception:', e);
+    return null;
+  }
+}
+
 // ==============================================================================
 // 7. STATUS STORIES (with 6h, 12h, 24h expiration)
 // ==============================================================================
@@ -1051,6 +1365,22 @@ export async function fetchActiveStatusesFromSupabase(): Promise<StatusStory[]> 
   } catch (e) {
     console.warn('[Supabase] fetchActiveStatuses error:', e);
     return [];
+  }
+}
+
+export async function deleteStatusStoryFromSupabase(storyId: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client || !storyId) return false;
+  try {
+    const { error } = await client.from('status_stories').delete().eq('id', storyId);
+    if (error) {
+      logSupabaseError('deleteStatusStoryFromSupabase', 'status_stories', error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[Supabase] deleteStatusStory exception:', e);
+    return false;
   }
 }
 
@@ -1362,6 +1692,164 @@ export async function fetchChannelPostsFromSupabase(channelId: string): Promise<
   }
 }
 
+export async function likeChannelPostInSupabase(postId: string, userId: string): Promise<string[]> {
+  const client = getSupabaseClient();
+  if (!client || !postId || !userId) return [];
+  try {
+    const { data: post, error: pErr } = await client.from('channel_posts').select('likes').eq('id', postId).single();
+    if (pErr || !post) return [];
+    const currentLikes: string[] = Array.isArray(post.likes) ? post.likes : [];
+    const nextLikes = currentLikes.includes(userId)
+      ? currentLikes.filter((id) => id !== userId)
+      : [...currentLikes, userId];
+
+    await client.from('channel_posts').update({ likes: nextLikes }).eq('id', postId);
+    return nextLikes;
+  } catch (e) {
+    console.error('[Supabase] likeChannelPost exception:', e);
+    return [];
+  }
+}
+
+export async function deleteChannelPostInSupabase(postId: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client || !postId) return true;
+  try {
+    const { error } = await client.from('channel_posts').delete().eq('id', postId);
+    if (error) {
+      logSupabaseError('deleteChannelPostInSupabase', 'channel_posts', error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[Supabase] deleteChannelPost exception:', e);
+    return false;
+  }
+}
+
+// ==============================================================================
+// 13. CALL LOGS & HISTORY
+// ==============================================================================
+
+export async function fetchCallLogsFromSupabase(userId: string): Promise<CallLog[]> {
+  const client = getSupabaseClient();
+  if (!client || !userId) return [];
+
+  try {
+    const { data, error } = await client
+      .from('call_logs')
+      .select('*')
+      .or(`caller_id.eq.${userId},receiver_id.eq.${userId}`)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (error) {
+      logSupabaseError('fetchCallLogsFromSupabase', 'call_logs', error);
+      return [];
+    }
+
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      callerId: row.caller_id,
+      callerName: row.caller_name || 'User',
+      callerAvatar: row.caller_avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${row.caller_id}`,
+      receiverId: row.receiver_id,
+      receiverName: row.receiver_name || 'User',
+      receiverAvatar: row.receiver_avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${row.receiver_id}`,
+      type: (row.type || row.call_type || 'audio') as any,
+      direction: (row.direction || (row.caller_id === userId ? 'outgoing' : 'incoming')) as any,
+      status: (row.status || 'completed') as any,
+      startedAt: row.started_at ? new Date(row.started_at).getTime() : new Date(row.created_at).getTime(),
+      endedAt: row.ended_at ? new Date(row.ended_at).getTime() : undefined,
+      duration: row.duration || 0,
+      durationSeconds: row.duration || 0,
+    }));
+  } catch (e: any) {
+    console.error('[Supabase] fetchCallLogsFromSupabase exception:', e);
+    return [];
+  }
+}
+
+export async function saveCallLogToSupabase(log: Partial<CallLog>): Promise<CallLog | null> {
+  const client = getSupabaseClient();
+  if (!client || !log.callerId || !log.receiverId) return null;
+
+  const logId = log.id || `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const startedAtIso = log.startedAt ? new Date(log.startedAt).toISOString() : new Date().toISOString();
+  const endedAtIso = log.endedAt ? new Date(log.endedAt).toISOString() : null;
+
+  const payload: any = {
+    id: logId,
+    caller_id: log.callerId,
+    receiver_id: log.receiverId,
+    caller_name: log.callerName || 'User',
+    caller_avatar: log.callerAvatar || null,
+    receiver_name: log.receiverName || 'User',
+    receiver_avatar: log.receiverAvatar || null,
+    type: log.type || 'audio',
+    direction: log.direction || 'outgoing',
+    status: log.status || 'completed',
+    duration: log.duration || log.durationSeconds || 0,
+    started_at: startedAtIso,
+    ended_at: endedAtIso,
+    created_at: startedAtIso,
+  };
+
+  try {
+    const { data, error } = await client.from('call_logs').upsert(payload, { onConflict: 'id' }).select().single();
+    if (error) {
+      logSupabaseError('saveCallLogToSupabase', 'call_logs', error);
+      // Fallback in case table has standard schema
+      const fallbackPayload = {
+        id: logId,
+        caller_id: log.callerId,
+        receiver_id: log.receiverId,
+        type: log.type === 'video' ? 'video' : 'audio',
+        status: log.status === 'missed' ? 'missed' : (log.status === 'rejected' ? 'rejected' : 'completed'),
+        duration: log.duration || log.durationSeconds || 0,
+        created_at: startedAtIso,
+      };
+      const { error: fbErr } = await client.from('call_logs').upsert(fallbackPayload, { onConflict: 'id' });
+      if (fbErr) {
+        logSupabaseError('saveCallLogToSupabase (fallback)', 'call_logs', fbErr);
+        return null;
+      }
+      return log as CallLog;
+    }
+    return log as CallLog;
+  } catch (err: any) {
+    console.error('[Supabase] saveCallLogToSupabase exception:', err);
+    return null;
+  }
+}
+
+export function subscribeToCallLogs(
+  userId: string,
+  onUpdate: () => void
+): () => void {
+  const client = getSupabaseClient();
+  if (!client || !userId) return () => {};
+
+  const channel = client
+    .channel(`user_call_logs_${userId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'call_logs',
+      },
+      () => {
+        onUpdate();
+      }
+    )
+    .subscribe();
+
+  return () => {
+    client.removeChannel(channel);
+  };
+}
+
 // ==============================================================================
 // 12. GLOBAL REALTIME MESSAGES (Offline delivery & Real-time across all chats)
 // ==============================================================================
@@ -1397,5 +1885,23 @@ export function subscribeToUserIncomingMessages(
   return () => {
     client.removeChannel(channel);
   };
+}
+
+export async function submitReportToSupabase(reportedBy: string, targetId: string, reason: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return true;
+  try {
+    const { error } = await client.from('reports').insert({
+      id: `rep_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      reported_by: reportedBy,
+      target_id: targetId,
+      reason,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    });
+    return !error;
+  } catch (e) {
+    return false;
+  }
 }
 

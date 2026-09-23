@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Channel, ChannelPost, Community } from '../../types';
 import { Avatar } from '../common/Avatar';
-import { apiFetch } from '../../utils/api';
 import { 
   fetchChannelPostsFromSupabase, 
   createChannelPostInSupabase, 
+  likeChannelPostInSupabase,
+  deleteChannelPostInSupabase,
   isSupabaseConfigured 
 } from '../../services/supabaseChat';
 import { toast } from '../common/Toast';
@@ -91,7 +92,7 @@ export const ChannelViewModal: React.FC<ChannelViewModalProps> = ({
       setIsLoading(true);
       let loadedPosts: ChannelPost[] = [];
 
-      // 1. Try Supabase first
+      // 1. Try Supabase
       if (isSupabaseConfigured()) {
         try {
           const sbPosts = await fetchChannelPostsFromSupabase(channel.id);
@@ -101,31 +102,6 @@ export const ChannelViewModal: React.FC<ChannelViewModalProps> = ({
         } catch (err) {
           console.warn('[ChannelViewModal] Supabase fetchChannelPosts error:', err);
         }
-      }
-
-      // 2. Try backend API
-      if (loadedPosts.length === 0) {
-        try {
-          const res = await apiFetch(`/api/channels/${channel.id}/posts`);
-          if (res.ok) {
-            const data = await res.json();
-            if (Array.isArray(data) && data.length > 0) {
-              loadedPosts = data;
-            }
-          }
-        } catch (err) {
-          console.warn('[ChannelViewModal] API fetch notice:', err);
-        }
-      }
-
-      // 3. Try LocalStorage cache
-      if (loadedPosts.length === 0) {
-        try {
-          const cached = JSON.parse(localStorage.getItem(`channel_posts_${channel.id}`) || '[]');
-          if (Array.isArray(cached) && cached.length > 0) {
-            loadedPosts = cached;
-          }
-        } catch (e) {}
       }
 
       // If still empty and channel has default announcement, provide initial welcome post
@@ -194,20 +170,6 @@ export const ChannelViewModal: React.FC<ChannelViewModalProps> = ({
     } else {
       toast.info('Unfollowed channel');
     }
-
-    // Try backend if running
-    try {
-      const endpoint = nextFollowing ? `/api/channels/${channel.id}/join` : `/api/channels/${channel.id}/leave`;
-      const res = await apiFetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (onChannelUpdated) onChannelUpdated(data.channel);
-      }
-    } catch (e) {}
   };
 
   const handleCopyChannelLink = () => {
@@ -267,22 +229,7 @@ export const ChannelViewModal: React.FC<ChannelViewModalProps> = ({
       }
     }
 
-    // 2. Fallback to API
-    if (!createdPost) {
-      try {
-        const response = await apiFetch(`/api/channels/${channel.id}/posts`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newPostPayload),
-        });
-        if (response.ok) {
-          const data = await response.json();
-          createdPost = data.post;
-        }
-      } catch (err) {}
-    }
-
-    // 3. Fallback to local
+    // Fallback to local
     if (!createdPost) {
       createdPost = {
         id: `post_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -295,9 +242,6 @@ export const ChannelViewModal: React.FC<ChannelViewModalProps> = ({
 
     const nextPosts = [createdPost, ...posts];
     setPosts(nextPosts);
-    try {
-      localStorage.setItem(`channel_posts_${channel.id}`, JSON.stringify(nextPosts));
-    } catch (e) {}
 
     setPostTitle('');
     setPostContent('');
@@ -312,11 +256,11 @@ export const ChannelViewModal: React.FC<ChannelViewModalProps> = ({
     if (!currentUser) return;
     setShowReactionPickerForPost(null);
 
+    const reactionKey = `${currentUser.id}:${emoji}`;
     setPosts((prev) => {
       const updated = prev.map((p) => {
         if (p.id === postId) {
           const currentLikes = p.likes || [];
-          const reactionKey = `${currentUser.id}:${emoji}`;
           const hasThisEmoji = currentLikes.includes(reactionKey);
           
           let newLikes = currentLikes.filter((id) => !id.startsWith(`${currentUser.id}:`));
@@ -327,18 +271,11 @@ export const ChannelViewModal: React.FC<ChannelViewModalProps> = ({
         }
         return p;
       });
-      try {
-        localStorage.setItem(`channel_posts_${channel.id}`, JSON.stringify(updated));
-      } catch (e) {}
       return updated;
     });
 
     try {
-      await apiFetch(`/api/channels/${channel.id}/posts/${postId}/like`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: `${currentUser.id}:${emoji}` }),
-      });
+      await likeChannelPostInSupabase(postId, reactionKey);
     } catch (err) {}
   };
 
@@ -348,16 +285,9 @@ export const ChannelViewModal: React.FC<ChannelViewModalProps> = ({
 
     const nextPosts = posts.filter((p) => p.id !== postId);
     setPosts(nextPosts);
-    try {
-      localStorage.setItem(`channel_posts_${channel.id}`, JSON.stringify(nextPosts));
-    } catch (e) {}
 
     try {
-      await apiFetch(`/api/channels/${channel.id}/posts/${postId}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requesterId: currentUser.id }),
-      });
+      await deleteChannelPostInSupabase(postId);
     } catch (err) {}
     toast.info('Post deleted');
   };

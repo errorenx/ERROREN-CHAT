@@ -2,7 +2,8 @@ import React, { createContext, useContext, useEffect, useRef, useState, useCallb
 import { useAuth } from './AuthContext';
 import { Message, StatusStory, CallType, SocketEventPayload, ActiveCall, CallStatus } from '../types';
 import { soundEffects } from '../utils/audio';
-import { apiFetch, getWebSocketUrl } from '../utils/api';
+import { getWebSocketUrl } from '../utils/api';
+import { saveCallLogToSupabase, subscribeToPresence } from '../services/supabaseChat';
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
 
@@ -110,15 +111,25 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setIsConnected(isNetOnline);
     setConnectionState(isNetOnline ? 'connected' : 'disconnected');
 
-    // Initial snapshot of online users via HTTP for immediate presence rendering
-    apiFetch('/api/presence/online')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && Array.isArray(data.onlineUserIds)) {
-          setOnlineUserIds(new Set(data.onlineUserIds));
-        }
-      })
-      .catch(() => {});
+    // Supabase presence subscription for reliable online status across all users
+    let unsubPresence: (() => void) | null = null;
+    if (currentUser?.id) {
+      try {
+        unsubPresence = subscribeToPresence((userId, isOnline) => {
+          setOnlineUserIds((prev) => {
+            const next = new Set(prev);
+            if (isOnline) {
+              next.add(userId);
+            } else {
+              next.delete(userId);
+            }
+            return next;
+          });
+        });
+      } catch (e) {
+        console.warn('Presence subscription note:', e);
+      }
+    }
 
     let isUnmounted = false;
     let reconnectTimeout: any = null;
@@ -244,6 +255,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     return () => {
       isUnmounted = true;
+      if (unsubPresence) unsubPresence();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (pingInterval) clearInterval(pingInterval);
       window.removeEventListener('online', handleOnline);
@@ -499,22 +511,18 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         },
       });
 
-      // Log call locally
-      apiFetch('/api/calls/log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          callerId: currentUser.id,
-          callerName: currentUser.displayName,
-          callerAvatar: currentUser.avatarUrl,
-          receiverId: partnerId,
-          receiverName: partnerName,
-          receiverAvatar: partnerAvatar,
-          type,
-          direction: 'outgoing',
-          status: 'ringing',
-          startedAt: Date.now(),
-        }),
+      // Log call to Supabase
+      saveCallLogToSupabase({
+        callerId: currentUser.id,
+        callerName: currentUser.displayName,
+        callerAvatar: currentUser.avatarUrl,
+        receiverId: partnerId,
+        receiverName: partnerName,
+        receiverAvatar: partnerAvatar,
+        type,
+        direction: 'outgoing',
+        status: 'ringing',
+        startedAt: Date.now(),
       }).catch(console.error);
 
     } catch (err) {
@@ -564,22 +572,18 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         },
       });
 
-      // Update call log
-      apiFetch('/api/calls/log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          callerId: currentIncoming.callerId,
-          callerName: currentIncoming.callerName,
-          callerAvatar: currentIncoming.callerAvatar,
-          receiverId: currentUser.id,
-          receiverName: currentUser.displayName,
-          receiverAvatar: currentUser.avatarUrl,
-          type: currentIncoming.callType,
-          direction: 'incoming',
-          status: 'connected',
-          startedAt: Date.now(),
-        }),
+      // Update call log in Supabase
+      saveCallLogToSupabase({
+        callerId: currentIncoming.callerId,
+        callerName: currentIncoming.callerName,
+        callerAvatar: currentIncoming.callerAvatar,
+        receiverId: currentUser.id,
+        receiverName: currentUser.displayName,
+        receiverAvatar: currentUser.avatarUrl,
+        type: currentIncoming.callType,
+        direction: 'incoming',
+        status: 'connected',
+        startedAt: Date.now(),
       }).catch(console.error);
 
     } catch (err) {
@@ -590,6 +594,20 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const rejectIncomingCall = () => {
     if (!incomingCall || !currentUser) return;
     soundEffects.stopIncomingRingtone();
+
+    // Log rejected call to Supabase
+    saveCallLogToSupabase({
+      callerId: incomingCall.callerId,
+      callerName: incomingCall.callerName,
+      callerAvatar: incomingCall.callerAvatar,
+      receiverId: currentUser.id,
+      receiverName: currentUser.displayName,
+      receiverAvatar: currentUser.avatarUrl,
+      type: incomingCall.callType,
+      direction: 'incoming',
+      status: 'rejected',
+      startedAt: Date.now(),
+    }).catch(console.error);
 
     emit({
       type: 'call:reject',
@@ -608,6 +626,22 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     soundEffects.stopIncomingRingtone();
 
     if (activeCall && currentUser) {
+      const durationSeconds = activeCall.startTime ? Math.max(0, Math.floor((Date.now() - activeCall.startTime) / 1000)) : 0;
+      saveCallLogToSupabase({
+        callerId: activeCall.isInitiator ? currentUser.id : activeCall.partnerId,
+        callerName: activeCall.isInitiator ? currentUser.displayName : activeCall.partnerName,
+        callerAvatar: activeCall.isInitiator ? currentUser.avatarUrl : activeCall.partnerAvatar,
+        receiverId: activeCall.isInitiator ? activeCall.partnerId : currentUser.id,
+        receiverName: activeCall.isInitiator ? activeCall.partnerName : currentUser.displayName,
+        receiverAvatar: activeCall.isInitiator ? activeCall.partnerAvatar : currentUser.avatarUrl,
+        type: activeCall.type,
+        direction: activeCall.isInitiator ? 'outgoing' : 'incoming',
+        status: 'ended',
+        startedAt: activeCall.startTime || Date.now(),
+        endedAt: Date.now(),
+        durationSeconds,
+      }).catch(console.error);
+
       emit({
         type: 'call:end',
         callData: {

@@ -387,21 +387,6 @@ export const ErrorenAiView: React.FC<ErrorenAiViewProps> = ({ currentUser, onBac
                 ERROREN AI
               </span>
             </div>
-            <span 
-              className={`text-[11px] font-medium flex items-center gap-1.5 ${
-                isAiOnline ? 'text-emerald-400' : 'text-slate-400'
-              }`}
-            >
-              <span 
-                className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                  isAiOnline 
-                    ? 'bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)] ring-1 ring-emerald-400/50' 
-                    : 'bg-slate-400 shadow-none'
-                }`}
-                title={isAiOnline ? 'Online' : 'Offline'}
-              />
-              {isAiOnline ? 'Online • Ready to assist' : 'Offline'}
-            </span>
           </div>
         </div>
 

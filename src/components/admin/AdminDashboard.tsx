@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, AdminStats, Report } from '../../types';
 import { Avatar } from '../common/Avatar';
 import { apiFetch } from '../../utils/api';
+import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabase';
 import { 
   ShieldAlert, 
   Users, 
@@ -33,6 +34,60 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const fetchAdminData = async () => {
     setIsLoading(true);
     try {
+      if (isSupabaseConfigured()) {
+        const client = getSupabaseClient();
+        if (client) {
+          try {
+            const [
+              { count: userCount },
+              { count: msgCount },
+              { count: callCount },
+              { count: groupCount },
+            ] = await Promise.all([
+              client.from('users').select('*', { count: 'exact', head: true }),
+              client.from('messages').select('*', { count: 'exact', head: true }),
+              client.from('call_logs').select('*', { count: 'exact', head: true }),
+              client.from('chats').select('*', { count: 'exact', head: true }).eq('is_group', true),
+            ]);
+
+            setStats({
+              totalUsers: userCount || allUsers.length,
+              totalMessages: msgCount || 0,
+              totalCalls: callCount || 0,
+              totalGroups: groupCount || 0,
+              activeUsers24h: userCount || allUsers.length,
+              serviceHealth: {
+                database: 'healthy',
+                realtime: 'healthy',
+                aiGateway: 'healthy',
+                mediaStorage: 'healthy',
+              },
+            });
+
+            const { data: repData } = await client
+              .from('reports')
+              .select('*')
+              .order('created_at', { ascending: false });
+
+            if (repData) {
+              setReports(
+                repData.map((r: any) => ({
+                  id: r.id,
+                  reportedBy: r.reported_by,
+                  targetId: r.target_id,
+                  reason: r.reason,
+                  status: r.status,
+                  createdAt: new Date(r.created_at).getTime(),
+                }))
+              );
+            }
+            return;
+          } catch (e) {
+            console.warn('[AdminDashboard] Supabase stats query fallback:', e);
+          }
+        }
+      }
+
       const statsRes = await apiFetch('/api/admin/stats');
       if (statsRes.ok) {
         const s = await statsRes.json();
@@ -57,6 +112,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleResolveReport = async (reportId: string, action: 'dismissed' | 'banned') => {
     try {
+      if (isSupabaseConfigured()) {
+        const client = getSupabaseClient();
+        if (client) {
+          await client.from('reports').update({ status: action }).eq('id', reportId);
+          fetchAdminData();
+          onRefreshUsers();
+          return;
+        }
+      }
+
       await apiFetch('/api/admin/resolve-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User } from '../../types';
 import { Avatar } from '../common/Avatar';
 import { UserPlus, X, Search, Check, Loader2 } from 'lucide-react';
-import { apiFetch } from '../../utils/api';
+import { addCommunityMemberInSupabase } from '../../services/supabaseChat';
 
 interface AddMembersModalProps {
   isOpen: boolean;
@@ -55,25 +55,15 @@ export const AddMembersModal: React.FC<AddMembersModalProps> = ({
     setError(null);
 
     try {
-      const response = await apiFetch(`/api/communities/${communityId}/members`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requesterId: currentUser.id,
-          userIds: selectedUserIds,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to add members');
+      for (const uid of selectedUserIds) {
+        await addCommunityMemberInSupabase(communityId, uid, 'member');
       }
 
       onMembersAdded();
       onClose();
     } catch (err: any) {
       console.error('Error adding members:', err);
-      setError(err.message || 'Network error adding members');
+      setError(err.message || 'Error adding members to community');
     } finally {
       setIsSubmitting(false);
     }

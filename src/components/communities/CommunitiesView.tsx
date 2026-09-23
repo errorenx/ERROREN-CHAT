@@ -5,7 +5,6 @@ import { CreateCommunityModal } from './CreateCommunityModal';
 import { CommunityProfileModal } from './CommunityProfileModal';
 import { ChannelViewModal } from './ChannelViewModal';
 import { JoinByInviteModal } from './JoinByInviteModal';
-import { apiFetch } from '../../utils/api';
 import { useTheme } from '../../context/ThemeContext';
 import {
   fetchCommunitiesFromSupabase,
@@ -65,44 +64,15 @@ export const CommunitiesView: React.FC<CommunitiesViewProps> = ({
     if (!quiet) setIsLoading(true);
     else setIsRefreshing(true);
 
-    let fetched = false;
-
-    // 1. Supabase first
     if (isSupabaseConfigured()) {
       try {
         const sbList = await fetchCommunitiesFromSupabase(currentUser?.id);
-        if (sbList && sbList.length > 0) {
+        if (sbList) {
           setCommunities(sbList);
-          fetched = true;
         }
       } catch (err) {
         console.warn('[CommunitiesView] Supabase fetch error:', err);
       }
-    }
-
-    if (!fetched) {
-      try {
-        const url = currentUser ? `/api/communities?userId=${currentUser.id}` : '/api/communities';
-        const response = await apiFetch(url);
-        if (response.ok) {
-          const data = await response.json();
-          if (Array.isArray(data) && data.length > 0) {
-            setCommunities(data);
-            fetched = true;
-          }
-        }
-      } catch (err) {
-        console.warn('Error fetching communities from backend:', err);
-      }
-    }
-
-    if (!fetched) {
-      try {
-        const local = JSON.parse(localStorage.getItem('erroren_communities') || '[]');
-        if (Array.isArray(local) && local.length > 0) {
-          setCommunities(local);
-        }
-      } catch {}
     }
 
     setIsLoading(false);
@@ -167,34 +137,6 @@ export const CommunitiesView: React.FC<CommunitiesViewProps> = ({
         console.warn('[CommunitiesView] Supabase join/leave error:', err);
       }
     }
-
-    // 2. Backend endpoint
-    const endpoint = nextJoined ? `/api/communities/${commId}/join` : `/api/communities/${commId}/leave`;
-    try {
-      await apiFetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id }),
-      });
-    } catch (err) {
-      console.warn('Backend join/leave unavailable:', err);
-    }
-
-    // Update local storage
-    try {
-      const local = JSON.parse(localStorage.getItem('erroren_communities') || '[]');
-      const updated = local.map((c: Community) => {
-        if (c.id === commId) {
-          return {
-            ...c,
-            isJoined: nextJoined,
-            memberCount: nextJoined ? (c.memberCount || 1) + 1 : Math.max(1, (c.memberCount || 1) - 1),
-          };
-        }
-        return c;
-      });
-      localStorage.setItem('erroren_communities', JSON.stringify(updated));
-    } catch {}
   };
 
   // Filter and search

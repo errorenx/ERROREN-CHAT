@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { User, Community } from '../../types';
 import { Avatar } from '../common/Avatar';
-import { apiFetch } from '../../utils/api';
 import { createCommunityInSupabase, isSupabaseConfigured } from '../../services/supabaseChat';
 import { 
   Users, 
@@ -78,48 +77,22 @@ export const CreateCommunityModal: React.FC<CreateCommunityModalProps> = ({
 
     const commId = `comm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-    // 1. Supabase first
-    if (isSupabaseConfigured()) {
-      try {
-        const sbComm = await createCommunityInSupabase({
-          id: commId,
-          name: name.trim(),
-          description: description.trim(),
-          avatarUrl: communityAvatar,
-          creatorId: currentUser.id,
-        });
-        if (sbComm) {
-          onCommunityCreated(sbComm);
-          onClose();
-          return;
-        }
-      } catch (err: any) {
-        console.warn('[CreateCommunityModal] Supabase creation error:', err);
-      }
-    }
-
+    // 1. Supabase creation
     try {
-      const response = await apiFetch('/api/communities', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim(),
-          avatarUrl: communityAvatar,
-          creatorId: currentUser.id,
-        }),
+      const sbComm = await createCommunityInSupabase({
+        id: commId,
+        name: name.trim(),
+        description: description.trim(),
+        avatarUrl: communityAvatar,
+        creatorId: currentUser.id,
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.community) {
-          onCommunityCreated(data.community);
-          onClose();
-          return;
-        }
+      if (sbComm) {
+        onCommunityCreated(sbComm);
+        onClose();
+        return;
       }
     } catch (err: any) {
-      console.warn('Backend unavailable, using static fallback for community:', err);
+      console.warn('[CreateCommunityModal] Supabase creation error:', err);
     }
 
     // Static / Offline fallback (e.g. GitHub Pages)

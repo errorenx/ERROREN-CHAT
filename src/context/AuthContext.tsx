@@ -1486,25 +1486,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!currentUser) return false;
 
     if (isSupabaseConfigured()) {
-      deleteContactFromSupabase(currentUser.id, contactId).catch((err) => {
+      try {
+        await deleteContactFromSupabase(currentUser.id, contactId);
+        setContacts((prev) => prev.filter((c) => c.id !== contactId));
+        return true;
+      } catch (err) {
         console.warn('[AuthContext] Supabase deleteContact error:', err);
-      });
+      }
     }
 
-    try {
-      const res = await apiFetch(`/api/contacts/${contactId}?userId=${encodeURIComponent(currentUser.id)}`, {
-        method: 'DELETE',
-      });
-      if (res.ok) {
-        await refreshContacts();
-        return true;
-      }
-      setContacts((prev) => prev.filter((c) => c.id !== contactId));
-      return true;
-    } catch {
-      setContacts((prev) => prev.filter((c) => c.id !== contactId));
-      return true;
-    }
+    setContacts((prev) => prev.filter((c) => c.id !== contactId));
+    return true;
   };
 
   const logout = () => {

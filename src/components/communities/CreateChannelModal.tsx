@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { User, Channel } from '../../types';
 import { Megaphone, X, Loader2, Lock, Globe, Shield } from 'lucide-react';
-import { apiFetch } from '../../utils/api';
 import { createChannelInSupabase, isSupabaseConfigured } from '../../services/supabaseChat';
 
 interface CreateChannelModalProps {
@@ -51,36 +50,16 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
       avatarUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(name.trim())}`,
     };
 
-    // 1. Supabase first
-    if (isSupabaseConfigured()) {
-      try {
-        const sbChannel = await createChannelInSupabase(communityId, channelPayload);
-        if (sbChannel) {
-          onChannelCreated(sbChannel);
-          onClose();
-          return;
-        }
-      } catch (err) {
-        console.warn('[CreateChannelModal] Supabase createChannel error:', err);
-      }
-    }
-
-    // 2. Fallback to API if available
+    // 1. Supabase creation
     try {
-      const response = await apiFetch(`/api/communities/${communityId}/channels`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(channelPayload),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        onChannelCreated(data.channel);
+      const sbChannel = await createChannelInSupabase(communityId, channelPayload);
+      if (sbChannel) {
+        onChannelCreated(sbChannel);
         onClose();
         return;
       }
-    } catch (err: any) {
-      console.warn('Backend API unavailable, using local creation:', err);
+    } catch (err) {
+      console.warn('[CreateChannelModal] Supabase createChannel error:', err);
     }
 
     // 3. Fallback to local channel creation
