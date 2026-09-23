@@ -78,9 +78,12 @@ const MainAppContent: React.FC = () => {
     const aiChatId = 'chat_erroren_ai';
     const userHandle = user.username ? `@${user.username}` : (user.displayName || 'user');
 
-    // Remove any test chats or mock artifacts using strict filter
+    // Remove any test chats or mock artifacts using strict filter and membership validation
     const filtered = (rawChats || []).filter((c) => {
       if (isTestChat(c, user.id)) return false;
+      const members = c.memberIds || c.participantIds || [];
+      // Chat must include the current user to prevent cross-account chat leaks
+      if (members.length > 0 && !members.includes(user.id) && c.id !== aiChatId) return false;
       return true;
     });
 
@@ -798,16 +801,18 @@ const MainAppContent: React.FC = () => {
 
       {/* Main Container Area */}
       <div className="flex-1 flex flex-col h-full min-w-0 relative">
-        {/* Top Header Bar */}
-        <TopBar
-          onOpenNewChat={() => setShowNewChatModal(true)}
-          onOpenNewGroup={() => setShowNewGroupModal(true)}
-          onOpenShare={() => setShowShareModal(true)}
-          onOpenAdmin={() => setActiveTab('admin')}
-          onOpenSettings={() => setActiveTab('settings')}
-          activeTab={activeTab}
-          isHiddenOnMobile={!!selectedChatId && activeTab === 'chats'}
-        />
+        {/* Top Header Bar (hidden when ERROREN AI has full-screen view) */}
+        {activeTab !== 'ai' && (
+          <TopBar
+            onOpenNewChat={() => setShowNewChatModal(true)}
+            onOpenNewGroup={() => setShowNewGroupModal(true)}
+            onOpenShare={() => setShowShareModal(true)}
+            onOpenAdmin={() => setActiveTab('admin')}
+            onOpenSettings={() => setActiveTab('settings')}
+            activeTab={activeTab}
+            isHiddenOnMobile={!!selectedChatId && activeTab === 'chats'}
+          />
+        )}
 
         {/* Dynamic View Body */}
         <main className="flex-1 flex overflow-hidden relative">
@@ -954,7 +959,7 @@ const MainAppContent: React.FC = () => {
           }}
           unreadCount={totalUnreadCount}
           hasUnseenStatus={statuses.length > 0}
-          isHidden={!!selectedChatId && activeTab === 'chats'}
+          isHidden={(!!selectedChatId && activeTab === 'chats') || activeTab === 'ai'}
         />
       </div>
 

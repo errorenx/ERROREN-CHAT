@@ -54,6 +54,12 @@ export async function findUserByUsername(
 
       if (!error && data && data.length > 0) {
         const user = mapProfileToUser(data[0]);
+        if (isTestUser(user)) {
+          return {
+            registered: false,
+            message: 'Available nhi hy (Is username pr koi account nhi bna huwa).',
+          };
+        }
         const isSelf = currentUserId ? user.id === currentUserId : false;
         return {
           registered: true,
@@ -71,7 +77,7 @@ export async function findUserByUsername(
   try {
     const localUsers: User[] = JSON.parse(localStorage.getItem('erroren_all_users') || '[]');
     const matched = localUsers.find(
-      (u) => (u.username || '').toLowerCase().replace(/^@/, '') === clean
+      (u) => (u.username || '').toLowerCase().replace(/^@/, '') === clean && !isTestUser(u)
     );
     if (matched) {
       const isSelf = currentUserId ? matched.id === currentUserId : false;
@@ -171,6 +177,9 @@ export async function findUserByPhone(
         );
         if (matched) {
           const user = mapProfileToUser(matched);
+          if (isTestUser(user)) {
+            return { registered: false, message: 'This number is not registered on ERROREN CHAT.' };
+          }
           const isSelf = currentUserId ? matched.id === currentUserId : false;
           return {
             registered: true,
@@ -189,6 +198,9 @@ export async function findUserByPhone(
       // Pick best match
       const matched = data[0];
       const user = mapProfileToUser(matched);
+      if (isTestUser(user)) {
+        return { registered: false, message: 'This number is not registered on ERROREN CHAT.' };
+      }
       const isSelf = currentUserId ? matched.id === currentUserId : false;
 
       return {

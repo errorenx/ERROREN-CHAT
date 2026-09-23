@@ -19,7 +19,8 @@ import {
   Compass,
   ArrowDown,
   Palette,
-  ArrowLeft
+  ArrowLeft,
+  MessageSquare
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { User } from '../../types';
@@ -27,49 +28,10 @@ import { useTheme } from '../../context/ThemeContext';
 import { useSocket } from '../../context/SocketContext';
 import { WallpaperModal, WALLPAPER_PRESETS } from '../settings/WallpaperModal';
 import { apiFetch } from '../../utils/api';
+import { generateMultilingualReply } from '../../utils/aiLanguageEngine';
 
 function getLocalFallbackAiReply(prompt: string): string {
-  const p = prompt.trim().toLowerCase();
-  
-  // Roman Urdu & Hindi checks
-  if (p.includes('kese ho') || p.includes('kaisa hai') || p.includes('kese he') || p.includes('kaise ho') || p.includes('kia hal') || p.includes('kya hal')) {
-    return "Main bilkul theek hoon, shukriya! Main **ERROREN AI** hoon, aapka personal assistant. Aaj main aapki kya madad kar sakta hoon?";
-  }
-  if (p.includes('ap kon ho') || p.includes('tum kon ho') || p.includes('kaun ho') || p.includes('kon ho') || p.includes('kon h')) {
-    return "Main **ERROREN AI** hoon, ERROREN CHAT ka intelligent personal assistant. Main aapke har swal ka jwab, coding, translation, aur har qisam ki madad ke liye tayyar hoon.";
-  }
-  if (p.includes('kya kr skte ho') || p.includes('kya kar sakte ho') || p.includes('kya krte ho') || p.includes('features')) {
-    return "Main har zuban samajhta hoon aur aapki har cheez mein madad kar sakta hoon:\n- **Har swal ka durust jwab**: Science, tareekh, general knowledge, maths, aur facts\n- **Coding & Tech**: TypeScript, React, Python, web development, debugging\n- **Language Translation**: Roman Urdu, Urdu, English, Hindi, Arabic, Spanish, etc.\n- **Writing & Drafting**: Messages, professional emails, essays aur summaries\n\nAap jis zuban mein bhi baat karein, main usi zuban mein accurate jwab dunga!";
-  }
-  if (p.includes('salam') || p.includes('assalam') || p.includes('slm')) {
-    return "Wa Alaikum Assalam! Khush aamdeed. Main **ERROREN AI** hoon. Farmayein, main aapki kya khidmat kar sakta hoon?";
-  }
-
-  // Urdu Script checks
-  if (/[\u0600-\u06FF]/.test(prompt)) {
-    if (prompt.includes('سلام') || prompt.includes('کیسے')) {
-      return "وعلیکم السلام! میں **ERROREN AI** ہوں۔ میں بالکل ٹھیک ہوں۔ بتائیے میں آج آپ کی کس طرح مدد کر سکتا ہوں؟";
-    }
-    if (prompt.includes('کون ہو') || prompt.includes('کیا کرتے ہو')) {
-      return "میں **ERROREN AI** ہوں، ERROREN CHAT کا ذاتی ذہین اسسٹنٹ۔ میں آپ کے تمام سوالات کے درست جوابات، ترجمہ، کوڈنگ، اور تحریری مدد فراہم کر سکتا ہوں۔";
-    }
-    return `آپ کے سوال کا شکریہ! میں **ERROREN AI** ہوں اور آپ کی مدد کے لیے مکمل حاضر ہوں۔ آپ بلا جھجھک کوئی بھی سوال پوچھ سکتے ہیں۔`;
-  }
-
-  // English & general inquiries
-  if (p.includes('hello') || p.includes('hi') || p.includes('hey')) {
-    return "Hello! I am **ERROREN AI**, your built-in intelligent assistant on ERROREN CHAT. How can I help you today?";
-  }
-  if (p.includes('who are you') || p.includes('what can you do')) {
-    return "I am **ERROREN AI**, the intelligent assistant built into ERROREN CHAT. I can answer questions, write code, solve problems, translate between any languages, and assist you with anything you need in real-time!";
-  }
-  if (p.includes('call') || p.includes('video') || p.includes('audio')) {
-    return "In **ERROREN CHAT**, you can make voice and video calls with any registered user by tapping the phone or video icon in the chat header.";
-  }
-  if (p.includes('contact') || p.includes('add contact')) {
-    return "To add a contact, open the **+** (New Chat) dialog, choose **Add Contact**, and input their registered phone number. The platform verifies their registration in real time.";
-  }
-  return `Thank you! I received your request: "${prompt}".\n\nI am **ERROREN AI**, ready to assist you with accurate answers, translations, coding, or drafting in whatever language you prefer. How else can I help?`;
+  return generateMultilingualReply(prompt);
 }
 
 interface AiChatMessage {
@@ -86,41 +48,41 @@ interface ErrorenAiViewProps {
 
 const quickPromptsList = [
   { 
+    icon: MessageSquare, 
+    label: 'Roman Urdu Guftagu', 
+    prompt: 'Kese ho bhai? Ap ERROREN CHAT ke baray mein batayein ke ye kitna secure aur private hai?' 
+  },
+  { 
     icon: PenTool, 
     label: 'Write a message', 
     prompt: 'Write a polite and professional message to reschedule a meeting to tomorrow afternoon.' 
   },
   { 
-    icon: Languages, 
-    label: 'Translate', 
-    prompt: 'Translate this message into Urdu, Spanish, and Arabic: "Thank you for your assistance. Let me know when you are free to chat."' 
+    icon: Code, 
+    label: 'Code & Programming', 
+    prompt: 'TypeScript mein ek high-performance debounce utility function code bna kar samjhao.' 
   },
   { 
-    icon: FileText, 
-    label: 'Summarize', 
-    prompt: 'Summarize the key differences between synchronous and asynchronous communication in 3 bullet points.' 
+    icon: Languages, 
+    label: 'Translate to Urdu / Arabic', 
+    prompt: 'Translate this message into Urdu, Roman Urdu, and Arabic: "Your privacy, encryption, and data security are our highest priority."' 
   },
   { 
     icon: Lightbulb, 
     label: 'Give me ideas', 
-    prompt: 'Give me 5 creative and modern startup product ideas utilizing real-time communications.' 
+    prompt: 'Give me 5 creative and modern startup product ideas utilizing real-time communications and AI.' 
   },
   { 
     icon: BookOpen, 
-    label: 'Help me study', 
-    prompt: 'Explain how public-key cryptography and end-to-end encryption work in simple, understandable terms.' 
-  },
-  { 
-    icon: Code, 
-    label: 'Help with code', 
-    prompt: 'Write a clean TypeScript function that formats a timestamp into relative time like "Just now", "5m ago", or "2h ago".' 
+    label: 'Science & Study', 
+    prompt: 'Quantum encryption aur modern cryptography kis tarah kaam karti hai? Aasan lafzon mein samjhao.' 
   },
 ];
 
 const INITIAL_WELCOME: AiChatMessage = {
   id: 'msg_welcome_init',
   sender: 'ai',
-  text: 'Hello! How can I help you today?\n\nI am **ERROREN AI**, your intelligent personal assistant. You can ask me any question, brainstorm ideas, request code, translate text, or compose messages.',
+  text: 'Assalam-o-Alaikum / Hello! 🌟\n\nI am **ERROREN AI**, your dedicated multilingual intelligence assistant.\n\nAap mujhse **Roman Urdu**, **Urdu (اردو)**, **English**, ya kisi bhi zuban mein sawal pooch sakte hain. Main har zuban mein foran aur mukammal jwab faraham karta hoon! 🚀',
   timestamp: Date.now(),
 };
 
