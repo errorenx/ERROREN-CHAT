@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content" />
+    <title>ERROREN CHAT</title>
+    <meta name="description" content="Secure, private, real-time messaging, audio/video calls, status stories, groups, and ERROREN AI assistant." />
+    <meta property="og:title" content="ERROREN CHAT" />
+    <meta property="og:description" content="Secure, private, real-time messaging, audio/video calls, status stories, groups, and ERROREN AI assistant." />
+    <meta name="theme-color" content="#070A0F" />
+    
+    <!-- PWA & Mobile Web App -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ERROREN CHAT" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="manifest" href="./manifest.json" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- 1. Immediate GitHub Pages Base Path & Trailing Slash Fixer (Must run before any assets load) -->
+    <script>
+      (function() {
+        var l = window.location;
+        var p = l.pathname;
+        var h = l.hostname;
+
+        // Check if hosted on GitHub Pages (*.github.io)
+        if (h.indexOf('github.io') !== -1) {
+          var segments = p.split('/').filter(Boolean);
+          var userPrefix = h.split('.')[0];
+          
+          // If in a project repository (e.g., user.github.io/repo-name)
+          if (segments.length > 0 && segments[0].toLowerCase() !== userPrefix.toLowerCase()) {
+            var repo = segments[0];
+            var repoBase = '/' + repo + '/';
+
+            // A. If missing trailing slash on repo root (e.g. user.github.io/repo), enforce it immediately
+            // Otherwise, relative assets like ./assets/... will resolve to user.github.io/assets/... (404 blank page)
+            if (!p.endsWith('/') && !p.substring(p.lastIndexOf('/')).includes('.')) {
+              l.replace(l.protocol + '//' + l.host + '/' + repo + '/' + (l.search || '') + (l.hash || ''));
+              return;
+            }
+
+            // B. Ensure a <base> tag exists pointing to the repository subdirectory
+            if (!document.querySelector('base')) {
+              var baseEl = document.createElement('base');
+              baseEl.href = repoBase;
+              if (document.head) {
+                document.head.insertBefore(baseEl, document.head.firstChild);
+              }
+            }
+          }
+        }
+
+        // C. Restore SPA path from 404.html redirection if present
+        if (l.search && l.search.length > 1 && l.search[1] === '/') {
+          var decoded = l.search.slice(1).split('&').map(function(s) { 
+            return s.replace(/~and~/g, '&');
+          }).join('?');
+          var basePath = l.pathname.endsWith('/') ? l.pathname.slice(0, -1) : l.pathname;
+          window.history.replaceState(null, null, basePath + decoded + (l.hash || ''));
+        }
+      })();
+    </script>
+
+    <!-- 2. Robust Client Error Interceptor & Diagnostic Display -->
+    <script>
+      // Gracefully handle errors and prevent blank screens (including script load 404s or source-branch deploys)
+      window.addEventListener('error', function(event) {
+        var target = event.target;
+        var loader = document.getElementById('app-initial-loader');
+        if (loader && !window.__APP_MOUNTED__) {
+          var msg = 'Failed to load script assets';
+          var isSourceDeployError = false;
+          if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+            var url = target.src || target.href || '';
+            if (url.indexOf('main.tsx') !== -1) {
+              isSourceDeployError = true;
+            }
+            msg = 'Resource failed to load: ' + url;
+          } else if (event && event.message) {
+            msg = event.message;
+            if (msg.indexOf('main.tsx') !== -1 || msg.indexOf('MIME type') !== -1) {
+              isSourceDeployError = true;
+            }
+          }
+          var desc = document.getElementById('app-loader-desc');
+          var errBox = document.getElementById('app-loader-error');
+          var actions = document.getElementById('app-loader-actions');
+          if (desc) {
+            desc.textContent = isSourceDeployError 
+              ? 'GitHub Pages Source Branch Notice'
+              : 'Application failed to initialize';
+          }
+          if (errBox) {
+            errBox.style.display = 'block';
+            if (isSourceDeployError) {
+              errBox.innerHTML = '<strong>Deployment Warning:</strong> GitHub Pages is currently serving the uncompiled source code from <code>main</code> branch instead of the production build.<br><br><strong>To Fix:</strong> In your GitHub repository, go to <strong>Settings &rarr; Pages</strong>. Under <em>Build and deployment &rarr; Source</em>, select <strong>GitHub Actions</strong> (or choose branch <strong>gh-pages</strong> and folder <strong>/ (root)</strong>).';
+            } else {
+              errBox.textContent = msg;
+            }
+          }
+          if (actions) actions.style.display = 'flex';
+        }
+      }, true);
+
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var msg = (reason && (reason.message || (typeof reason === 'string' ? reason : ''))) || '';
+        if (msg.indexOf('WebSocket closed without opened') !== -1 || msg.indexOf('[vite]') !== -1) {
+          event.preventDefault();
+        }
+      });
+
+      // Watchdog fallback: If not mounted within 5 seconds, present helpful recovery buttons
+      setTimeout(function() {
+        if (!window.__APP_MOUNTED__) {
+          var loader = document.getElementById('app-initial-loader');
+          if (loader) {
+            var desc = document.getElementById('app-loader-desc');
+            var actions = document.getElementById('app-loader-actions');
+            if (desc) desc.textContent = 'Connecting to server / cache...';
+            if (actions) actions.style.display = 'flex';
+          }
+        }
+      }, 4500);
+    </script>
+    <script type="module" crossorigin src="/ERROREN-CHAT/assets/index-QEdwJ5kf.js"></script>
+    <link rel="modulepreload" crossorigin href="/ERROREN-CHAT/assets/vendor-DYrNgg9N.js">
+    <link rel="stylesheet" crossorigin href="/ERROREN-CHAT/assets/index-Dc53aOfa.css">
+  </head>
+  <body style="background-color: #070A0F; color: #F1F5F9; min-height: 100vh; margin: 0;" class="bg-[#070A0F] text-slate-100 antialiased selection:bg-emerald-500/30 selection:text-emerald-200 overflow-x-hidden font-sans">
+    <div id="root">
+      <div id="app-initial-loader" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; background-color: #070A0F; color: #94A3B8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 20px; box-sizing: border-box;">
+        <style>
+          @keyframes app-spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        </style>
+        <div style="width: 44px; height: 44px; border: 3px solid rgba(16, 185, 129, 0.2); border-top-color: #10B981; border-radius: 50%; animation: app-spin 0.8s linear infinite; margin-bottom: 16px;"></div>
+        <div style="font-size: 16px; font-weight: 700; letter-spacing: 0.08em; color: #F8FAFC; text-transform: uppercase;">ERROREN CHAT</div>
+        <div id="app-loader-desc" style="margin-top: 6px; font-size: 13px; color: #64748B;">Starting application...</div>
+        <div id="app-loader-error" style="display: none; margin-top: 12px; max-width: 400px; padding: 10px 14px; background-color: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px; font-family: monospace; font-size: 11px; color: #FCA5A5; word-break: break-word;"></div>
+        <div id="app-loader-actions" style="display: none; margin-top: 16px; gap: 8px;">
+          <button onclick="window.location.reload()" style="background-color: #10B981; color: #022c22; font-weight: 700; font-size: 12px; padding: 8px 16px; border-radius: 10px; border: none; cursor: pointer;">Reload Page</button>
+          <button onclick="try{localStorage.clear()}catch(e){}window.location.reload()" style="background-color: #1E293B; color: #CBD5E1; font-weight: 600; font-size: 12px; padding: 8px 16px; border-radius: 10px; border: 1px solid #334155; cursor: pointer;">Clear Cache & Reload</button>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+
