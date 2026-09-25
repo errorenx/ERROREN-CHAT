@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Logo } from '../common/Logo';
+import { compressAndOptimizeImage } from '../../utils/imageCompressor';
 import { Camera, Sparkles, User as UserIcon, Check, Loader2, ArrowRight, AtSign, Phone, Mail, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 const COUNTRY_CODES = [
@@ -54,16 +55,26 @@ export const ProfileSetupScreen: React.FC = () => {
   const hasValidPhone = cleanPhoneDigits.length >= 6;
   const hasValidEmail = Boolean(cleanEmail.includes('@') && cleanEmail.includes('.') && cleanEmail.length >= 5);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setAvatarUrl(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const optimized = await compressAndOptimizeImage(file, {
+          maxWidth: 480,
+          maxHeight: 480,
+          quality: 0.88,
+          mimeType: 'image/jpeg',
+        });
+        setAvatarUrl(optimized.dataUrl);
+      } catch (err) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            setAvatarUrl(reader.result);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
     }
   };
 

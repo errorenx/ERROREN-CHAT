@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { uploadFileToSupabaseStorage } from '../../services/supabaseChat';
+import { compressAndOptimizeImage } from '../../utils/imageCompressor';
 import { 
   X, 
   Camera, 
@@ -16,7 +17,10 @@ import {
   Mail,
   AlertCircle,
   CheckCircle2,
-  Lock
+  Lock,
+  Link as LinkIcon,
+  Trash2,
+  Upload
 } from 'lucide-react';
 
 interface EditProfileModalProps {
@@ -33,6 +37,17 @@ const BIO_TEMPLATES = [
   "Can't talk, ERROREN CHAT only 💬",
   'Living life one day at a time ✨',
   'Offline / Traveling ✈️',
+];
+
+const PRESET_AVATARS = [
+  'https://api.dicebear.com/7.x/bottts/svg?seed=CyberAlpha',
+  'https://api.dicebear.com/7.x/bottts/svg?seed=NeonMatrix',
+  'https://api.dicebear.com/7.x/bottts/svg?seed=QuantumPulse',
+  'https://api.dicebear.com/7.x/adventurer/svg?seed=Alex',
+  'https://api.dicebear.com/7.x/adventurer/svg?seed=Sam',
+  'https://api.dicebear.com/7.x/adventurer/svg?seed=Noor',
+  'https://api.dicebear.com/7.x/identicon/svg?seed=Star',
+  'https://api.dicebear.com/7.x/thumbs/svg?seed=Happy',
 ];
 
 const COUNTRY_CODES = [
@@ -52,6 +67,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
   const { currentUser, updateProfile, savePhoneNumber, userSettings, updateUserSettings, error } = useAuth();
   const { isDark, currentAccent } = useTheme();
   
+  // ALL hooks must be declared unconditionally at the top level
   const [displayName, setDisplayName] = useState(currentUser?.displayName || '');
   const [username, setUsername] = useState(currentUser?.username || '');
   const [phoneNumber, setPhoneNumber] = useState(currentUser?.phoneNumber || '');
@@ -77,7 +93,110 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [customPhotoUrl, setCustomPhotoUrl] = useState('');
+  const [showPresets, setShowPresets] = useState(false);
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Synchronize form state whenever modal opens or currentUser updates
+  useEffect(() => {
+    if (isOpen && currentUser) {
+      setDisplayName(currentUser.displayName || '');
+      setUsername(currentUser.username || '');
+      setPhoneNumber(currentUser.phoneNumber || '');
+      setCountryCode(currentUser.countryCode || '+92');
+      setEmail(currentUser.email || '');
+      setAbout(currentUser.about || 'Available | Using ERROREN CHAT ⚡');
+      setAvatarUrl(currentUser.avatarUrl || '');
+      setProfilePhotoVisibility(userSettings.privacy?.profilePhotoVisibility || 'everyone');
+      setAboutVisibility(userSettings.privacy?.aboutVisibility || 'everyone');
+      setLastSeenVisibility(userSettings.privacy?.lastSeenVisibility || 'everyone');
+      setOnlineVisibility(userSettings.privacy?.onlineVisibility || 'everyone');
+      setErrorMsg(null);
+      setSavedSuccess(false);
+      setShowUrlInput(false);
+      setShowPresets(false);
+    }
+  }, [isOpen, currentUser, userSettings.privacy]);
+
+  const processAndSetPhoto = async (file: File) => {
+    if (!file) return;
+    setIsUploadingPhoto(true);
+    setErrorMsg(null);
+
+    try {
+      // 1. Client-side compress to crisp avatar image (<40KB)
+      const optimized = await compressAndOptimizeImage(file, {
+        maxWidth: 480,
+        maxHeight: 480,
+        quality: 0.88,
+        mimeType: 'image/jpeg',
+      });
+
+      // 2. Set optimized dataUrl immediately for instant preview
+      setAvatarUrl(optimized.dataUrl);
+
+      // 3. Try to upload to Supabase Storage if configured
+      if (currentUser?.id) {
+        try {
+          const publicUrl = await uploadFileToSupabaseStorage(optimized.blob, 'avatars', currentUser.id);
+          if (publicUrl) {
+            setAvatarUrl(publicUrl);
+          }
+        } catch (storageErr) {
+          console.warn('[EditProfileModal] Supabase storage upload note (using optimized image):', storageErr);
+        }
+      }
+    } catch (err: any) {
+      console.warn('[EditProfileModal] Compression warning, falling back to direct reader:', err);
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setAvatarUrl(reader.result);
+        }
+      };
+      reader.onerror = () => {
+        setErrorMsg('Could not read selected photo.');
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processAndSetPhoto(file);
+    }
+    e.target.value = '';
+  };
+
+  const handleGenerateRandomAvatar = () => {
+    const seed = Math.random().toString(36).substring(2, 9);
+    setAvatarUrl(`https://api.dicebear.com/7.x/bottts/svg?seed=${seed}`);
+  };
+
+  const handleApplyCustomUrl = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customPhotoUrl.trim()) return;
+    setAvatarUrl(customPhotoUrl.trim());
+    setCustomPhotoUrl('');
+    setShowUrlInput(false);
+  };
+
+  const handleRemovePhoto = () => {
+    if (currentUser?.id) {
+      setAvatarUrl(`https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.id}`);
+    } else {
+      setAvatarUrl('');
+    }
+  };
+
+  // Safe early exit AFTER all hooks have executed
   if (!isOpen || !currentUser) return null;
 
   const isProfileAlreadyCompleted = Boolean(
@@ -95,50 +214,6 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
   const hasValidPhone = cleanPhoneDigits.length >= 6;
   const hasValidEmail = Boolean(cleanEmail.includes('@') && cleanEmail.includes('.') && cleanEmail.length >= 5);
   const isAllValid = hasValidName && hasValidUsername && hasValidPhone && hasValidEmail;
-
-  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        setErrorMsg('Image size exceeds 5MB. Please choose a smaller photo.');
-        return;
-      }
-      setIsUploadingPhoto(true);
-      setErrorMsg(null);
-
-      try {
-        const publicUrl = await uploadFileToSupabaseStorage(file, 'avatars', currentUser.id);
-        if (publicUrl) {
-          setAvatarUrl(publicUrl);
-          setIsUploadingPhoto(false);
-          return;
-        }
-      } catch (err) {
-        console.warn('[EditProfileModal] Supabase storage upload attempt error:', err);
-      }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setAvatarUrl(reader.result);
-          setIsUploadingPhoto(false);
-          setErrorMsg(null);
-        }
-      };
-      reader.onerror = () => {
-        setIsUploadingPhoto(false);
-        setErrorMsg('Could not read selected photo.');
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleGenerateRandomAvatar = () => {
-    const seed = Math.random().toString(36).substring(2, 8);
-    setAvatarUrl(`https://api.dicebear.com/7.x/bottts/svg?seed=${seed}`);
-  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -345,44 +420,185 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
                 className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover bg-slate-800 border-2 shadow-xl"
                 style={{ borderColor: currentAccent.hex }}
               />
-              <label className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition text-white text-[11px] font-semibold">
+              <label 
+                title="Change Photo"
+                className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition text-white text-[11px] font-semibold"
+              >
                 {isUploadingPhoto ? (
                   <Loader2 className="w-5 h-5 mb-1 animate-spin text-emerald-400" />
                 ) : (
                   <Camera className="w-5 h-5 mb-1" />
                 )}
-                <span>{isUploadingPhoto ? 'Uploading...' : 'Upload'}</span>
-                <input type="file" accept="image/*" disabled={isUploadingPhoto} onChange={handleFileUpload} className="hidden" />
+                <span>{isUploadingPhoto ? 'Processing...' : 'Change DP'}</span>
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  disabled={isUploadingPhoto} 
+                  onChange={handleFileUpload} 
+                  className="hidden" 
+                />
               </label>
             </div>
 
-            <div className="flex items-center gap-2 mt-2.5">
-              <label className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition flex items-center gap-1.5 border ${
-                isUploadingPhoto ? 'opacity-60 cursor-not-allowed' : ''
-              } ${
-                isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-              }`}>
-                {isUploadingPhoto ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
-                <span>{isUploadingPhoto ? 'Uploading Photo...' : 'Choose Photo'}</span>
-                <input type="file" accept="image/*" disabled={isUploadingPhoto} onChange={handleFileUpload} className="hidden" />
-              </label>
+            {/* Hidden Camera Input for direct camera capture */}
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="user"
+              disabled={isUploadingPhoto}
+              onChange={handleFileUpload}
+              className="hidden"
+            />
 
+            {/* Hidden Gallery Input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              disabled={isUploadingPhoto}
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+
+            {/* DP Control Buttons */}
+            <div className="flex items-center flex-wrap justify-center gap-1.5 mt-2.5">
+              {/* Choose from files */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploadingPhoto}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition flex items-center gap-1.5 border ${
+                  isUploadingPhoto ? 'opacity-60 cursor-not-allowed' : ''
+                } ${
+                  isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                }`}
+                title="Upload photo from device"
+              >
+                {isUploadingPhoto ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" /> : <Upload className="w-3.5 h-3.5" />}
+                <span>{isUploadingPhoto ? 'Optimizing...' : 'Upload Photo'}</span>
+              </button>
+
+              {/* Take with Camera */}
+              <button
+                type="button"
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={isUploadingPhoto}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 border ${
+                  isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                }`}
+                title="Take photo using camera"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Camera</span>
+              </button>
+
+              {/* Presets Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowPresets(!showPresets)}
+                disabled={isUploadingPhoto}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 border ${
+                  showPresets 
+                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' 
+                    : isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                }`}
+                title="Choose from avatar presets"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Presets</span>
+              </button>
+
+              {/* URL Input Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowUrlInput(!showUrlInput)}
+                disabled={isUploadingPhoto}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 border ${
+                  showUrlInput 
+                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' 
+                    : isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                }`}
+                title="Enter custom image URL"
+              >
+                <LinkIcon className="w-3.5 h-3.5" />
+                <span>Image Link</span>
+              </button>
+
+              {/* Random Avatar */}
               <button
                 type="button"
                 onClick={handleGenerateRandomAvatar}
                 disabled={isUploadingPhoto}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 border ${
+                className={`p-1.5 rounded-xl text-xs font-semibold transition flex items-center justify-center border ${
                   isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
                 }`}
-                title="Generate Bottts Avatar"
+                title="Generate Random Avatar"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Random Avatar</span>
               </button>
+
+              {/* Reset / Remove Photo */}
+              {avatarUrl && (
+                <button
+                  type="button"
+                  onClick={handleRemovePhoto}
+                  disabled={isUploadingPhoto}
+                  className="p-1.5 rounded-xl text-xs font-semibold transition flex items-center justify-center border bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border-rose-500/20"
+                  title="Reset to default DP"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
+
+            {/* Custom URL Input Field */}
+            {showUrlInput && (
+              <div className="w-full mt-2 flex items-center gap-2 animate-in fade-in">
+                <input
+                  type="url"
+                  placeholder="Paste direct image URL (https://...)"
+                  value={customPhotoUrl}
+                  onChange={(e) => setCustomPhotoUrl(e.target.value)}
+                  className={`flex-1 px-3 py-1.5 rounded-xl text-xs border focus:outline-none ${
+                    isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-100 border-slate-300 text-slate-900'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={handleApplyCustomUrl}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition"
+                >
+                  Apply
+                </button>
+              </div>
+            )}
+
+            {/* Avatar Presets Grid */}
+            {showPresets && (
+              <div className="w-full mt-2.5 p-2 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-center gap-2 overflow-x-auto animate-in fade-in">
+                {PRESET_AVATARS.map((url, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setAvatarUrl(url);
+                      setShowPresets(false);
+                    }}
+                    className={`relative rounded-full p-0.5 transition hover:scale-110 shrink-0 ${
+                      avatarUrl === url ? 'ring-2 ring-emerald-400' : 'opacity-80 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={url} alt={`Preset ${idx}`} className="w-9 h-9 rounded-full bg-slate-900" />
+                  </button>
+                ))}
+              </div>
+            )}
+
             {avatarUrl && (
-              <span className="text-[10px] text-emerald-400 mt-1 font-medium">
-                ✓ Photo saved to Supabase Storage
+              <span className="text-[10px] text-emerald-400 mt-1.5 font-medium flex items-center gap-1">
+                <Check className="w-3 h-3 text-emerald-400" />
+                DP ready (saves automatically with profile)
               </span>
             )}
           </div>

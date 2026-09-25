@@ -64,15 +64,13 @@ export const CommunitiesView: React.FC<CommunitiesViewProps> = ({
     if (!quiet) setIsLoading(true);
     else setIsRefreshing(true);
 
-    if (isSupabaseConfigured()) {
-      try {
-        const sbList = await fetchCommunitiesFromSupabase(currentUser?.id);
-        if (sbList) {
-          setCommunities(sbList);
-        }
-      } catch (err) {
-        console.warn('[CommunitiesView] Supabase fetch error:', err);
+    try {
+      const list = await fetchCommunitiesFromSupabase(currentUser?.id);
+      if (list && list.length > 0) {
+        setCommunities(list);
       }
+    } catch (err) {
+      console.warn('[CommunitiesView] Communities fetch error:', err);
     }
 
     setIsLoading(false);

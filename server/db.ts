@@ -290,12 +290,10 @@ export function isServerTestUser(u: any): boolean {
 // Clean up any demo or mock users and test chats
 function cleanMockDataIfPresent() {
   const mockUserIds = [
-    'usr_ayesha', 'usr_zain', 'usr_fatima', 'usr_hassan', 'usr_ali', 'usr_sarah', 'usr_erroren_ai',
-    'usr_g_1788450244096_0m7h', 'usr_g_1788683625251_fkdh', 'usr_g_1788977611978_g8y1',
-    'usr_1788977741968_5mfdt', 'usr_1788977917668_b0hin', 'usr_p_1789025836351_wvi6', 'usr_1789027110977_vurxt'
+    'usr_ayesha', 'usr_zain', 'usr_fatima', 'usr_hassan', 'usr_ali', 'usr_sarah', 'usr_erroren_ai'
   ];
-  const mockGroupIds = ['chat_grp_family', 'chat_grp_work', 'chat_grp_study', 'chat_grp_friends', 'chat_1789026111971_emok', 'chat_1789546741695_qsg9'];
-  const mockCommIds = ['comm_rajpoot', 'comm_erroren_demo', 'comm_erroren_developers'];
+  const mockGroupIds = ['chat_grp_family', 'chat_grp_work', 'chat_grp_study', 'chat_grp_friends'];
+  const mockCommIds = ['comm_rajpoot', 'comm_erroren_demo'];
 
   let modified = false;
 
@@ -328,28 +326,6 @@ function cleanMockDataIfPresent() {
     }
   });
 
-  // Remove any chat with "test", "janu", or "mani" or mock members or AI
-  Object.keys(dbState.chats).forEach((cid) => {
-    const c = dbState.chats[cid];
-    if (!c) return;
-    const name = (c.name || c.title || '').toLowerCase();
-    if (
-      name.includes('test') || 
-      name === 'janu' || 
-      name === 'mani' || 
-      name.includes('erroren ai') || 
-      name.includes('ready to assist') ||
-      cid.includes('chat_ai') ||
-      cid.includes('erroren_ai') ||
-      cid === 'chat_1789026111971_emok' || 
-      cid === 'chat_1789546741695_qsg9'
-    ) {
-      delete dbState.chats[cid];
-      delete dbState.messages[cid];
-      modified = true;
-    }
-  });
-
   // Clean mock communities if any
   mockCommIds.forEach((cid) => {
     if (dbState.communities[cid]) {
@@ -357,6 +333,76 @@ function cleanMockDataIfPresent() {
       modified = true;
     }
   });
+
+  // Ensure default official communities exist so communities are NEVER empty or 'not found'
+  if (Object.keys(dbState.communities).length === 0) {
+    const defaultCommId = 'comm_official_erroren';
+    const defaultChanId = 'chan_official_announcements';
+    const systemAdminId = 'usr_system_admin';
+
+    // Provision admin user if not present
+    if (!dbState.users[systemAdminId]) {
+      dbState.users[systemAdminId] = {
+        id: systemAdminId,
+        displayName: 'ERROREN Official',
+        username: 'erroren_official',
+        about: 'Official ERROREN CHAT System Admin ⚡',
+        avatarUrl: 'https://api.dicebear.com/7.x/shapes/svg?seed=ERROREN_OFFICIAL',
+        isOnline: true,
+        lastSeen: Date.now(),
+        role: 'admin',
+        createdAt: Date.now(),
+      };
+    }
+
+    dbState.communities[defaultCommId] = {
+      id: defaultCommId,
+      name: 'ERROREN Official Community',
+      description: 'Official global community space for ERROREN CHAT announcements, feature updates, and discussions.',
+      avatarUrl: 'https://api.dicebear.com/7.x/identicon/svg?seed=ERROREN_Official_Community',
+      creatorId: systemAdminId,
+      members: [
+        { userId: systemAdminId, role: 'owner', joinedAt: Date.now() },
+      ],
+      adminIds: [systemAdminId],
+      groupIds: [],
+      channelIds: [defaultChanId],
+      inviteCode: 'ERROREN2026',
+      isPublic: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    dbState.channels[defaultChanId] = {
+      id: defaultChanId,
+      communityId: defaultCommId,
+      name: 'Announcements',
+      description: 'Official announcements, release notes, and updates from the ERROREN CHAT team.',
+      avatarUrl: 'https://api.dicebear.com/7.x/shapes/svg?seed=ERROREN_Announcements',
+      creatorId: systemAdminId,
+      adminIds: [systemAdminId],
+      followerIds: [systemAdminId],
+      isReadOnly: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    const welcomePostId = 'post_official_welcome';
+    dbState.channelPosts[defaultChanId] = [{
+      id: welcomePostId,
+      channelId: defaultChanId,
+      authorId: systemAdminId,
+      authorName: 'ERROREN Official',
+      authorAvatar: 'https://api.dicebear.com/7.x/shapes/svg?seed=ERROREN_OFFICIAL',
+      title: 'Welcome to ERROREN CHAT Communities! 🚀',
+      content: 'Welcome to the official community space of ERROREN CHAT! Here you can follow official announcements, create discussion groups, and collaborate with members worldwide. Everything is secure, private, and real-time.',
+      createdAt: Date.now(),
+      likes: [systemAdminId],
+    }];
+
+    modified = true;
+    console.log('[Database] Seeded official default ERROREN community and channels.');
+  }
 
   // Clean up any generated ai chat entries
   Object.keys(dbState.chats).forEach((cid) => {

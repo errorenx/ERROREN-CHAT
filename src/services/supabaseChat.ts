@@ -984,7 +984,6 @@ export async function createCommunityInSupabase(comm: {
   avatarUrl: string;
   creatorId: string;
 }): Promise<Community | null> {
-  const client = getSupabaseClient();
   const newCommunity: Community = {
     id: comm.id,
     name: comm.name,
@@ -1003,12 +1002,35 @@ export async function createCommunityInSupabase(comm: {
     isJoined: true,
   };
 
-  if (!client) return newCommunity;
-
+  // 1. Sync to backend /api/communities to persist in server and broadcast
   try {
-    const { data, error } = await client
-      .from('communities')
-      .insert({
+    const res = await fetch('/api/communities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: comm.id,
+        name: comm.name,
+        description: comm.description,
+        avatarUrl: comm.avatarUrl,
+        creatorId: comm.creatorId,
+        isPublic: true,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.community) {
+        Object.assign(newCommunity, data.community);
+      }
+    }
+  } catch (err) {
+    console.warn('[Community API] Backend createCommunity sync error:', err);
+  }
+
+  // 2. Also try Supabase if configured
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      await client.from('communities').insert({
         id: comm.id,
         name: comm.name,
         description: comm.description,
@@ -1019,78 +1041,111 @@ export async function createCommunityInSupabase(comm: {
         invite_code: newCommunity.inviteCode,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
+      });
 
-    if (!error && data) {
-      // Also add creator to community_members
-      try {
-        await client.from('community_members').insert({
-          community_id: comm.id,
-          user_id: comm.creatorId,
-          role: 'owner',
-        });
-      } catch {
-        // ignore duplicate or non-fatal insertion
-      }
+      await client.from('community_members').insert({
+        community_id: comm.id,
+        user_id: comm.creatorId,
+        role: 'owner',
+      });
+    } catch (e) {
+      console.warn('[Supabase] createCommunity error:', e);
     }
-
-    return newCommunity;
-  } catch (e) {
-    console.warn('[Supabase] createCommunity error:', e);
-    return newCommunity;
   }
+
+  return newCommunity;
 }
 
 export async function fetchCommunitiesFromSupabase(userId?: string): Promise<Community[]> {
+  const commMap = new Map<string, Community>();
+
+  // 1. Try Supabase
   const client = getSupabaseClient();
-  if (!client) return [];
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from('communities')
+        .select('*')
+        .order('created_at', { ascending: false });
 
+      if (!error && data) {
+        let userJoinedCommIds = new Set<string>();
+        if (userId) {
+          const { data: memberRows } = await client
+            .from('community_members')
+            .select('community_id')
+            .eq('user_id', userId);
+
+          if (memberRows) {
+            memberRows.forEach((r: any) => userJoinedCommIds.add(r.community_id));
+          }
+        }
+
+        data.forEach((c: any) => {
+          commMap.set(c.id, {
+            id: c.id,
+            name: c.name,
+            description: c.description || '',
+            avatarUrl: c.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(c.name)}`,
+            creatorId: c.creator_id,
+            members: [],
+            adminIds: [c.creator_id],
+            groupIds: [],
+            channelIds: [],
+            inviteCode: c.invite_code || c.id.substring(0, 8),
+            isPublic: Boolean(c.is_public ?? true),
+            createdAt: c.created_at ? new Date(c.created_at).getTime() : Date.now(),
+            updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
+            memberCount: c.member_count || 1,
+            isJoined: userId ? userJoinedCommIds.has(c.id) : false,
+          });
+        });
+      }
+    } catch (err) {
+      console.warn('[Supabase] fetchCommunities error:', err);
+    }
+  }
+
+  // 2. Fetch from Backend /api/communities and merge
   try {
-    const { data, error } = await client
-      .from('communities')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error || !data) return [];
-
-    let userJoinedCommIds = new Set<string>();
-    if (userId) {
-      const { data: memberRows } = await client
-        .from('community_members')
-        .select('community_id')
-        .eq('user_id', userId);
-
-      if (memberRows) {
-        memberRows.forEach((r: any) => userJoinedCommIds.add(r.community_id));
+    const url = userId ? `/api/communities?userId=${userId}` : '/api/communities';
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        data.forEach((c: Community) => {
+          if (!commMap.has(c.id)) {
+            commMap.set(c.id, c);
+          } else {
+            const existing = commMap.get(c.id)!;
+            commMap.set(c.id, {
+              ...existing,
+              isJoined: c.isJoined || existing.isJoined,
+              memberCount: Math.max(c.memberCount || 1, existing.memberCount || 1),
+            });
+          }
+        });
       }
     }
-
-    return data.map((c: any) => ({
-      id: c.id,
-      name: c.name,
-      description: c.description || '',
-      avatarUrl: c.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${c.name}`,
-      creatorId: c.creator_id,
-      members: [],
-      adminIds: [c.creator_id],
-      groupIds: [],
-      channelIds: [],
-      inviteCode: c.invite_code || c.id.substring(0, 8),
-      isPublic: Boolean(c.is_public ?? true),
-      createdAt: c.created_at ? new Date(c.created_at).getTime() : Date.now(),
-      updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
-      memberCount: c.member_count || 1,
-      isJoined: userId ? userJoinedCommIds.has(c.id) : false,
-    }));
   } catch (err) {
-    console.warn('[Supabase] fetchCommunities error:', err);
-    return [];
+    console.warn('[Community API] fetchCommunities server error:', err);
   }
+
+  return Array.from(commMap.values());
 }
 
 export async function joinCommunityInSupabase(communityId: string, userId: string): Promise<boolean> {
+  // Sync to server backend
+  try {
+    await fetch(`/api/communities/${communityId}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+  } catch (err) {
+    console.warn('[Community API] joinCommunity backend sync:', err);
+  }
+
   const client = getSupabaseClient();
   if (!client) return true;
 
@@ -1116,6 +1171,17 @@ export async function joinCommunityInSupabase(communityId: string, userId: strin
 }
 
 export async function leaveCommunityInSupabase(communityId: string, userId: string): Promise<boolean> {
+  // Sync to server backend
+  try {
+    await fetch(`/api/communities/${communityId}/leave`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+  } catch (err) {
+    console.warn('[Community API] leaveCommunity backend sync:', err);
+  }
+
   const client = getSupabaseClient();
   if (!client) return true;
 
@@ -1183,6 +1249,17 @@ export async function updateCommunityMemberRoleInSupabase(communityId: string, u
 }
 
 export async function updateCommunityInSupabase(communityId: string, updates: Partial<Community>): Promise<boolean> {
+  // Sync to server backend
+  try {
+    await fetch(`/api/communities/${communityId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+  } catch (err) {
+    console.warn('[Community API] updateCommunity server sync:', err);
+  }
+
   const client = getSupabaseClient();
   if (!client) return true;
   try {
@@ -1202,6 +1279,15 @@ export async function updateCommunityInSupabase(communityId: string, updates: Pa
 }
 
 export async function deleteCommunityInSupabase(communityId: string): Promise<boolean> {
+  // Sync to server backend
+  try {
+    await fetch(`/api/communities/${communityId}`, {
+      method: 'DELETE',
+    });
+  } catch (err) {
+    console.warn('[Community API] deleteCommunity server sync:', err);
+  }
+
   const client = getSupabaseClient();
   if (!client) return true;
   try {
@@ -1215,89 +1301,136 @@ export async function deleteCommunityInSupabase(communityId: string): Promise<bo
 }
 
 export async function getCommunityByInviteCode(code: string): Promise<Community | null> {
-  const client = getSupabaseClient();
-  if (!client || !code) return null;
-  try {
-    const cleanCode = code.trim().toUpperCase();
-    const { data, error } = await client
-      .from('communities')
-      .select('*')
-      .or(`invite_code.ilike.${cleanCode},id.ilike.${cleanCode}`)
-      .limit(1);
+  const cleanCode = (code || '').trim();
+  if (!cleanCode) return null;
 
-    if (error || !data || data.length === 0) return null;
-    const c = data[0];
-    return {
-      id: c.id,
-      name: c.name,
-      description: c.description || '',
-      avatarUrl: c.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${c.name}`,
-      creatorId: c.creator_id,
-      members: [],
-      adminIds: [c.creator_id],
-      groupIds: [],
-      channelIds: [],
-      inviteCode: c.invite_code || c.id.substring(0, 8),
-      isPublic: Boolean(c.is_public ?? true),
-      createdAt: c.created_at ? new Date(c.created_at).getTime() : Date.now(),
-      updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
-      memberCount: c.member_count || 1,
-      isJoined: false,
-    };
-  } catch (e) {
-    console.error('[Supabase] getCommunityByInviteCode exception:', e);
-    return null;
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from('communities')
+        .select('*')
+        .or(`invite_code.ilike.${cleanCode.toUpperCase()},id.ilike.${cleanCode}`)
+        .limit(1);
+
+      if (!error && data && data.length > 0) {
+        const c = data[0];
+        return {
+          id: c.id,
+          name: c.name,
+          description: c.description || '',
+          avatarUrl: c.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${c.name}`,
+          creatorId: c.creator_id,
+          members: [],
+          adminIds: [c.creator_id],
+          groupIds: [],
+          channelIds: [],
+          inviteCode: c.invite_code || c.id.substring(0, 8),
+          isPublic: Boolean(c.is_public ?? true),
+          createdAt: c.created_at ? new Date(c.created_at).getTime() : Date.now(),
+          updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
+          memberCount: c.member_count || 1,
+          isJoined: false,
+        };
+      }
+    } catch (e) {
+      console.error('[Supabase] getCommunityByInviteCode exception:', e);
+    }
   }
+
+  // Fallback to server API /api/invites/:inviteCode
+  try {
+    const res = await fetch(`/api/invites/${encodeURIComponent(cleanCode)}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.community) {
+        return data.community;
+      }
+    }
+  } catch (err) {
+    console.warn('[Community Invite Lookup] Server fetch error:', err);
+  }
+
+  return null;
 }
 
 export async function fetchCommunityByIdFromSupabase(communityId: string, currentUserId?: string): Promise<Community | null> {
+  if (!communityId) return null;
+
   const client = getSupabaseClient();
-  if (!client || !communityId) return null;
-  try {
-    const { data: c, error } = await client.from('communities').select('*').eq('id', communityId).single();
-    if (error || !c) return null;
+  let communityFromSupabase: Community | null = null;
 
-    // Fetch members
-    const { data: memberRows } = await client
-      .from('community_members')
-      .select('user_id, role, created_at, profile:user_id(*)')
-      .eq('community_id', communityId);
+  if (client) {
+    try {
+      const { data: c, error } = await client.from('communities').select('*').eq('id', communityId).single();
+      if (!error && c) {
+        // Fetch members
+        const { data: memberRows } = await client
+          .from('community_members')
+          .select('user_id, role, created_at, profile:user_id(*)')
+          .eq('community_id', communityId);
 
-    const members = (memberRows || []).map((m: any) => ({
-      userId: m.user_id,
-      role: m.role || 'member',
-      joinedAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
-      user: m.profile ? mapProfileToUser(m.profile) : undefined,
-    }));
+        const members = (memberRows || []).map((m: any) => ({
+          userId: m.user_id,
+          role: m.role || 'member',
+          joinedAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+          user: m.profile ? mapProfileToUser(m.profile) : undefined,
+        }));
 
-    const adminIds = members.filter((m: any) => m.role === 'admin' || m.role === 'owner').map((m: any) => m.userId);
-    const isJoined = currentUserId ? members.some((m: any) => m.userId === currentUserId) : false;
+        const adminIds = members.filter((m: any) => m.role === 'admin' || m.role === 'owner').map((m: any) => m.userId);
+        const isJoined = currentUserId ? members.some((m: any) => m.userId === currentUserId) : false;
 
-    // Fetch channels
-    const channels = await fetchChannelsFromSupabase(communityId);
+        // Fetch channels
+        const channels = await fetchChannelsFromSupabase(communityId);
 
-    return {
-      id: c.id,
-      name: c.name,
-      description: c.description || '',
-      avatarUrl: c.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${c.name}`,
-      creatorId: c.creator_id,
-      members,
-      adminIds: adminIds.length > 0 ? adminIds : [c.creator_id],
-      groupIds: [],
-      channelIds: channels.map((ch) => ch.id),
-      channels,
-      inviteCode: c.invite_code || c.id.substring(0, 8),
-      isPublic: Boolean(c.is_public ?? true),
-      createdAt: c.created_at ? new Date(c.created_at).getTime() : Date.now(),
-      updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
-      memberCount: members.length > 0 ? members.length : (c.member_count || 1),
-      isJoined,
-    };
-  } catch (e) {
-    console.error('[Supabase] fetchCommunityById exception:', e);
-    return null;
+        communityFromSupabase = {
+          id: c.id,
+          name: c.name,
+          description: c.description || '',
+          avatarUrl: c.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${c.name}`,
+          creatorId: c.creator_id,
+          members,
+          adminIds: adminIds.length > 0 ? adminIds : [c.creator_id],
+          groupIds: [],
+          channelIds: channels.map((ch) => ch.id),
+          channels,
+          inviteCode: c.invite_code || c.id.substring(0, 8),
+          isPublic: Boolean(c.is_public ?? true),
+          createdAt: c.created_at ? new Date(c.created_at).getTime() : Date.now(),
+          updatedAt: c.updated_at ? new Date(c.updated_at).getTime() : Date.now(),
+          memberCount: members.length > 0 ? members.length : (c.member_count || 1),
+          isJoined,
+        };
+      }
+    } catch (e) {
+      console.warn('[Supabase] fetchCommunityById exception:', e);
+    }
   }
+
+  if (communityFromSupabase) {
+    return communityFromSupabase;
+  }
+
+  // Fallback to server API /api/communities/:id
+  try {
+    const url = currentUserId ? `/api/communities/${communityId}?userId=${currentUserId}` : `/api/communities/${communityId}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.community) {
+        return {
+          ...data.community,
+          channels: data.channels || [],
+          groups: data.groups || [],
+          isJoined: data.isJoined ?? false,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[Community API] fetchCommunityById server error:', err);
+  }
+
+  return null;
 }
 
 // ==============================================================================

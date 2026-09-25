@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { User, Community } from '../../types';
 import { Avatar } from '../common/Avatar';
 import { createCommunityInSupabase, isSupabaseConfigured } from '../../services/supabaseChat';
+import { compressAndOptimizeImage } from '../../utils/imageCompressor';
 import { 
   Users, 
   X, 
@@ -36,22 +37,28 @@ export const CreateCommunityModal: React.FC<CreateCommunityModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 10 * 1024 * 1024) {
-      setError('Image size exceeds 10MB limit.');
-      return;
+    try {
+      const optimized = await compressAndOptimizeImage(file, {
+        maxWidth: 480,
+        maxHeight: 480,
+        quality: 0.88,
+        mimeType: 'image/jpeg',
+      });
+      setAvatarUrl(optimized.dataUrl);
+      setError(null);
+    } catch (err) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setAvatarUrl(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
     }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setAvatarUrl(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleRandomAvatar = () => {

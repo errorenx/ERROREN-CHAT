@@ -844,6 +844,48 @@ app.post('/api/auth/profile', (req: Request, res: Response) => {
   res.json({ success: true, user, isProfileComplete });
 });
 
+// Update User Avatar
+app.post('/api/users/:id/avatar', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { avatarUrl } = req.body;
+  if (!id || !avatarUrl) {
+    return res.status(400).json({ error: 'User ID and avatar URL are required.' });
+  }
+
+  let user = db.getUserById(id);
+  if (!user) {
+    user = db.createUser({
+      id,
+      displayName: 'ERROREN Member',
+      about: 'Available | Using ERROREN CHAT ⚡',
+      avatarUrl,
+      isOnline: true,
+      lastSeen: Date.now(),
+      role: 'user',
+      createdAt: Date.now(),
+    });
+  } else {
+    user = db.updateUser(id, { avatarUrl })!;
+  }
+
+  // Broadcast user update to all active WebSocket clients
+  try {
+    const payload = JSON.stringify({
+      type: 'user:updated',
+      user,
+    });
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    });
+  } catch (err) {
+    console.error('Failed to broadcast avatar update:', err);
+  }
+
+  res.json({ success: true, avatarUrl: user.avatarUrl, user });
+});
+
 // 2. Optional Phone Number Management
 app.post('/api/account/phone', (req: Request, res: Response) => {
   const { userId, phoneNumber, countryCode, phoneVisibility } = req.body;
@@ -2336,43 +2378,82 @@ app.post('/api/ai/chat', async (req: Request, res: Response) => {
   const { messages, userMessage } = req.body;
   totalAiRequests++;
 
-  const detectedUserLang = detectLanguage(userMessage || '');
+  const currentUserPrompt = String(userMessage || '').trim();
+  const detectedUserLang = detectLanguage(currentUserPrompt);
 
   const systemInstruction = `You are ERROREN AI, the dedicated, intelligent, comprehensive, and multilingual AI assistant inside ERROREN CHAT ("Secure. Private. Real-time.").
 
-CRITICAL DYNAMIC LANGUAGE DIRECTIVE (HIGHEST PRIORITY):
-- User Question Language Detected: ${detectedUserLang.toUpperCase()}
-- ALWAYS reply in the EXACT SAME language and dialect that the user used to ask their question!
-- If the user writes in Roman Urdu (Urdu in English alphabet, e.g. "kese ho", "ap kon ho", "mujhe code bna kr do", "ye swal hal kr do", "bhai suno"):
-  * You MUST reply in fluent, natural, respectful Roman Urdu.
-  * Do NOT reply in English or Devanagari Hindi or Arabic script.
-  * Example style: "Main bilkul theek hoon! Aap batayein aaj main aapki kya madad kar sakta hoon?"
-- If the user writes in Urdu script (e.g. "آپ کیسے ہیں", "مجھے مدد چاہیے"):
-  * You MUST reply in fluent, grammatically proper Urdu script.
-- If the user writes in English:
-  * Reply in articulate, structured English.
-- If the user writes in Hindi or Arabic or another language:
-  * Reply in that exact language.
-- Provide comprehensive, accurate, high-quality, and proper replies to every question:
-  * Science, technology, mathematics, history, geography, real-world facts
-  * Complete, clean, working programming code in any language (TypeScript, React, Python, Java, etc.)
-  * Creative writing, essays, summaries, professional letters, and communication advice
-  * Format all responses with clean, beautifully organized Markdown (bullet points, bold highlights, code blocks with syntax highlighting).`;
+CRITICAL DIRECTIVES:
+1. ACCURACY & COMPLETENESS:
+   - Provide complete, intelligent, accurate, natural, and genuinely helpful answers.
+   - Never truncate responses or produce empty/boilerplate replies.
+   - For simple greetings or concise questions, answer crisply and politely.
+   - For complex, scientific, or coding questions, provide thorough, step-by-step, organized explanations.
+
+2. CONTEXT AWARENESS:
+   - You have access to the conversation history. Maintain context seamlessly across follow-up questions.
+   - Correctly resolve pronouns, implicit subjects, and earlier referenced items ("us ka camera kaisa hai?", "what else does it do?").
+
+3. NATURAL MULTILINGUAL COMMUNICATION:
+   - User Detected Language: ${detectedUserLang.toUpperCase()}
+   - ALWAYS reply in the exact language, dialect, and script used by the user.
+   - If the user writes in Roman Urdu (Urdu written in English letters, e.g. "kese ho", "ap kon ho", "mujhe code bna kr do", "ye swal hal kr do", "bhai suno"):
+     * Reply in fluent, natural, friendly, respectful Roman Urdu.
+     * Do NOT reply in Devanagari Hindi or English when addressed in Roman Urdu.
+     * Example: "Main bilkul theek hoon! Aap batayein aaj main aapki kya madad kar sakta hoon?"
+   - If the user writes in Urdu script (e.g. "آپ کیسے ہیں", "مجھے کوڈ بنا کر دیں"):
+     * Reply in grammatically proper Urdu script.
+   - If the user writes in English:
+     * Reply in clear, articulate, professional English.
+   - If the user writes in Hindi, Arabic, or another language:
+     * Reply in that language and script.
+
+4. TECHNICAL & PROGRAMMING EXCELLENCE:
+   - Provide clean, production-ready, complete code with appropriate language syntax highlighting blocks (e.g. \`\`\`typescript, \`\`\`python, \`\`\`jsx).
+   - Diagnose bugs accurately and provide the exact fix.
+
+5. MARKDOWN FORMATTING:
+   - Format all responses with clean, beautifully organized Markdown (bold headings, bullet points, clean code blocks).`;
 
   const client = getGeminiClient();
 
   if (client) {
-    const formattedHistory = (messages || [])
-      .map((m: any) => `${m.role === 'user' ? 'User' : 'ERROREN AI'}: ${m.content}`)
-      .join('\n');
-    const prompt = formattedHistory
-      ? `${formattedHistory}\nUser: ${userMessage}\n[Instruction: Reply in ${detectedUserLang.toUpperCase()}]\nERROREN AI:`
-      : `User: ${userMessage}\n[Instruction: Reply in ${detectedUserLang.toUpperCase()}]\nERROREN AI:`;
+    // Construct multi-turn contents according to Gemini API specification
+    const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+
+    if (Array.isArray(messages)) {
+      for (const m of messages) {
+        if (!m || !m.content) continue;
+        const role = m.role === 'user' ? 'user' : 'model';
+        if (contents.length > 0 && contents[contents.length - 1].role === role) {
+          contents[contents.length - 1].parts[0].text += `\n\n${m.content}`;
+        } else {
+          contents.push({
+            role,
+            parts: [{ text: String(m.content) }],
+          });
+        }
+      }
+    }
+
+    // Ensure the latest user message is the final user turn in contents
+    if (currentUserPrompt) {
+      if (contents.length === 0 || contents[contents.length - 1].role !== 'user') {
+        contents.push({
+          role: 'user',
+          parts: [{ text: currentUserPrompt }],
+        });
+      } else {
+        if (!contents[contents.length - 1].parts[0].text.includes(currentUserPrompt)) {
+          contents[contents.length - 1].parts[0].text = currentUserPrompt;
+        }
+      }
+    }
 
     const candidateModels = [
       'gemini-3.8-flash',
-      'gemini-3.6-flash',
-      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-flash-latest',
     ];
     let lastError: any = null;
 
@@ -2380,7 +2461,7 @@ CRITICAL DYNAMIC LANGUAGE DIRECTIVE (HIGHEST PRIORITY):
       try {
         const generatePromise = client.models.generateContent({
           model,
-          contents: prompt,
+          contents,
           config: {
             systemInstruction,
             temperature: 0.7,
@@ -2388,18 +2469,22 @@ CRITICAL DYNAMIC LANGUAGE DIRECTIVE (HIGHEST PRIORITY):
         });
 
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Model ${model} call timed out`)), 15000)
+          setTimeout(() => reject(new Error(`Model ${model} call timed out`)), 25000)
         );
 
         const aiResponse: any = await Promise.race([generatePromise, timeoutPromise]);
 
         if (aiResponse && aiResponse.text) {
-          return res.json({ success: true, reply: aiResponse.text, isFallback: false });
+          return res.json({
+            success: true,
+            reply: aiResponse.text.trim(),
+            modelUsed: model,
+            isFallback: false,
+          });
         }
       } catch (err: any) {
         lastError = err;
-        const errMsg = err?.message || String(err);
-        console.warn(`[ERROREN AI] Model ${model} generation attempt failed:`, errMsg);
+        console.warn(`[ERROREN AI] Model ${model} generation attempt failed:`, err?.message || err);
       }
     }
 
@@ -2409,7 +2494,7 @@ CRITICAL DYNAMIC LANGUAGE DIRECTIVE (HIGHEST PRIORITY):
   }
 
   // Intelligent multilingual engine matching user's exact language (Roman Urdu, Urdu, English, Hindi, Arabic, etc.)
-  const reply = generateMultilingualReply(userMessage || '');
+  const reply = generateMultilingualReply(currentUserPrompt);
   return res.json({ success: true, reply, isFallback: true, language: detectedUserLang });
 });
 
@@ -2435,8 +2520,8 @@ app.post('/api/ai/assist', async (req: Request, res: Response) => {
 
     const candidateModels = [
       'gemini-3.8-flash',
-      'gemini-3.6-flash',
-      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-flash-latest',
     ];
     for (const model of candidateModels) {
       try {
@@ -2446,7 +2531,7 @@ app.post('/api/ai/assist', async (req: Request, res: Response) => {
         });
 
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Model ${model} call timed out`)), 2500)
+          setTimeout(() => reject(new Error(`Model ${model} call timed out`)), 7000)
         );
 
         const aiResponse: any = await Promise.race([generatePromise, timeoutPromise]);
